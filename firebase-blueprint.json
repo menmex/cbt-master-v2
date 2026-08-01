@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account and free trial subscription profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "username": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["student", "admin"] },
+        "universityName": { "type": "string", "maxLength": 150 },
+        "departmentName": { "type": "string", "maxLength": 150 },
+        "subscription": { "type": "object" },
+        "bookmarks": { "type": "array" },
+        "createdDate": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "CBT practice question item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "questionText": { "type": "string" },
+        "options": { "type": "array" },
+        "correctAnswer": { "type": "string" },
+        "explanation": { "type": "string" },
+        "difficulty": { "type": "string" }
+      },
+      "required": ["id", "courseId", "questionText", "options", "correctAnswer"]
+    },
+    "University": {
+      "title": "University",
+      "description": "Partner university record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "abbreviation": { "type": "string" },
+        "location": { "type": "string" },
+        "isDisabled": { "type": "boolean" }
+      },
+      "required": ["id", "name", "abbreviation"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Academic course program",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "departmentId": { "type": "string" },
+        "isDisabled": { "type": "boolean" }
+      },
+      "required": ["id", "code", "title"]
+    },
+    "TestResult": {
+      "title": "TestResult",
+      "description": "Completed CBT practice or mock exam result",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "score": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "percentage": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "userId", "score", "totalQuestions"]
+    },
+    "StudyMaterial": {
+      "title": "StudyMaterial",
+      "description": "Learning resource material or lecture note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "universityId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "type": { "type": "string" },
+        "accessLevel": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "totalDownloads": { "type": "number" },
+        "uploadedBy": { "type": "string" },
+        "uploadDate": { "type": "string" }
+      },
+      "required": ["id", "title", "type", "accessLevel"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile records containing subscription & free trial usage"
+    },
+    "/questions/{questionId}": {
+      "schema": "Question",
+      "description": "CBT practice questions bank"
+    },
+    "/universities/{universityId}": {
+      "schema": "University",
+      "description": "Partner university institutions"
+    },
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Academic course programs"
+    },
+    "/materials/{materialId}": {
+      "schema": "StudyMaterial",
+      "description": "Study materials and lecture resources"
+    },
+    "/results/{resultId}": {
+      "schema": "TestResult",
+      "description": "Test exam session results"
+    }
+  }
+}
