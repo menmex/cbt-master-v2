@@ -33,6 +33,7 @@ import { SystemHealthModule } from './admin/SystemHealthModule';
 import { AuditComplianceModule } from './admin/AuditComplianceModule';
 import { SecurityAccessModule } from './admin/SecurityAccessModule';
 import { TopicRequestManagementModule } from './admin/TopicRequestManagementModule';
+import { MenCoreManagementModule } from './admin/MenCoreManagementModule';
 import {
   Shield,
   BookOpen,
@@ -111,7 +112,8 @@ export type AdminCategory =
   | 'feedback_support'
   | 'audit_compliance'
   | 'security_access'
-  | 'topic_requests';
+  | 'topic_requests'
+  | 'mencore_ai';
 
 export type AdminRole =
   | 'Super Administrator'
@@ -183,6 +185,7 @@ export const CATEGORY_REQUIRED_PERMISSIONS: Record<string, string> = {
   audit_compliance: 'manage_reports',
   security_access: 'manage_settings',
   topic_requests: 'manage_study_materials',
+  mencore_ai: 'manage_settings',
 };
 
 interface AdminDashboardProps {
@@ -1210,6 +1213,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {activeCategory === 'audit_compliance' && 'Audit & Compliance Center'}
                 {activeCategory === 'security_access' && 'Security & Access Control'}
                 {activeCategory === 'topic_requests' && 'Community Learning & Topic Requests'}
+                {activeCategory === 'mencore_ai' && 'MenCore AI System & Joyce Tutor Studio'}
               </h1>
             </div>
             <p className="text-xs text-slate-400 mt-1">
@@ -1252,6 +1256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ['audit_compliance', '19. Audit & Compliance Center'],
                   ['security_access', '20. Security & Access Control'],
                   ['topic_requests', '21. Community Learning & Topic Requests'],
+                  ['mencore_ai', '22. MenCore AI System & Joyce Tutor Studio'],
                 ] as [AdminCategory, string][]
               ).map(([catKey, label]) => {
                 const acc = checkCategoryAccess(catKey);
@@ -1302,7 +1307,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   'students', 'universities', 'courses', 'questions', 'review_workflow',
                   'study_materials', 'notifications', 'leaderboard', 'payments', 'question_analytics',
                   'ai_generator_history', 'backup_restore', 'activity_logs', 'roles_permissions',
-                  'reports', 'system_health', 'feedback_support', 'audit_compliance', 'security_access', 'topic_requests'
+                  'reports', 'system_health', 'feedback_support', 'audit_compliance', 'security_access', 'topic_requests', 'mencore_ai'
                 ] as AdminCategory[]
               ).map((catKey) => {
                 if (!catKey) return null;
@@ -1529,7 +1534,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span>Quick Actions</span>
             </h2>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
               <button
                 onClick={() => handleQuickActionWithPermission('manage_questions', handleQuickAddQuestion, 'Add Question')}
                 className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-xl transition-all text-left flex flex-col justify-between h-24 group cursor-pointer"
@@ -1585,6 +1590,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <FileSpreadsheet className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
                 <span className="text-xs font-bold text-slate-200">View Reports</span>
               </button>
+
+              <button
+                onClick={() => handleQuickActionWithPermission('manage_settings', () => setActiveCategory('mencore_ai'), 'MenCore AI Management')}
+                className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-xl transition-all text-left flex flex-col justify-between h-24 group cursor-pointer"
+              >
+                <Sparkles className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
+                <span className="text-xs font-bold text-slate-200">MenCore AI</span>
+              </button>
             </div>
           </div>
 
@@ -1617,6 +1630,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { id: 'audit_compliance', title: 'Audit & Compliance Center', desc: 'Governance, risk assessments, policy checks & investigation records.', icon: ShieldAlert, color: 'text-rose-400', border: 'hover:border-rose-500' },
                 { id: 'security_access', title: 'Security & Access Control', desc: 'Firewall rules, login security, device manager & emergency lock.', icon: ShieldCheck, color: 'text-emerald-400', border: 'hover:border-emerald-500' },
                 { id: 'topic_requests', title: 'Community Learning & Topic Requests', desc: 'Community learning hub, student topic requests, grouped demand analytics, Joyce & video tutorial team production & video management.', icon: MessageSquarePlus, color: 'text-indigo-400', border: 'hover:border-indigo-500' },
+                { id: 'mencore_ai', title: 'MenCore AI System & Joyce Tutor Studio', desc: '11 AI management modules: system prompt, vector knowledge base, model router, audio TTS engine, rate limits & cost analytics.', icon: Sparkles, color: 'text-amber-400', border: 'hover:border-amber-500' },
               ].map((cat) => {
                 const IconComp = cat.icon;
                 const access = checkCategoryAccess(cat.id as AdminCategory);
@@ -3948,6 +3962,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* --- Topic Requests & Community Management Interface --- */}
       {activeCategory === 'topic_requests' && (
         <TopicRequestManagementModule universities={universities} courses={courses} />
+      )}
+
+      {/* --- MenCore AI System Management & Joyce Tutor Studio --- */}
+      {activeCategory === 'mencore_ai' && (
+        <MenCoreManagementModule />
       )}
 
       {/* Role Permissions Matrix Modal */}

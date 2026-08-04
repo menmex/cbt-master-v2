@@ -36,6 +36,7 @@ import { EditProfileModal } from './components/EditProfileModal';
 import { TrialAlertModal } from './components/TrialAlertModal';
 import { AboutModal } from './components/AboutModal';
 import { FeaturesPdfModal } from './components/FeaturesPdfModal';
+import { MenCoreWidget } from './components/MenCoreWidget';
 
 export default function App() {
   // Application Data State
@@ -619,6 +620,19 @@ export default function App() {
         onClose={() => setFeaturesPdfModalOpen(false)}
       />
 
+      {/* MenCore AI Assistant Widget (Powered by Menmex) */}
+      <MenCoreWidget
+        currentUser={currentUser}
+        onNavigate={(view, tab) => {
+          setActiveTab(view);
+          if (view === 'dashboard' && tab === 'subscription') {
+            setSubModalOpen(true);
+          } else if (view === 'dashboard' && tab === 'profile') {
+            setEditProfileModalOpen(true);
+          }
+        }}
+        isAuthModalOpen={authModalOpen}
+      />
     </div>
   );
 }

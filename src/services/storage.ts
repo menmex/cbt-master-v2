@@ -211,43 +211,60 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       // ignore
     }
 
-    const cName = val?.constructor?.name || '';
+    let cName = '';
+    try {
+      cName = val?.constructor?.name || '';
+    } catch {
+      cName = '';
+    }
 
     // Firebase Auth User
-    if (
-      val.stsTokenManager ||
-      val.proactiveRefresh ||
-      val.reloadUserInfo ||
-      val.reloadListener ||
-      (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
-    ) {
-      return {
-        id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
-        uid: typeof val.uid === 'string' ? val.uid : undefined,
-        email: typeof val.email === 'string' ? val.email : undefined,
-        displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
-        photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
-      };
+    try {
+      if (
+        val.stsTokenManager ||
+        val.proactiveRefresh ||
+        val.reloadUserInfo ||
+        val.reloadListener ||
+        (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
+      ) {
+        return {
+          id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
+          uid: typeof val.uid === 'string' ? val.uid : undefined,
+          email: typeof val.email === 'string' ? val.email : undefined,
+          displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
+          photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
+        };
+      }
+    } catch {
+      // ignore
     }
 
     // Minified Firebase Auth / Firestore SDK internal circular objects (Y2, Ka, etc.)
-    const isCircularSdkObject =
-      cName === 'Y2' ||
-      cName === 'Ka' ||
-      ('src' in val && 'i' in val) ||
-      (val.src !== undefined && val.i !== undefined) ||
-      (cName.length <= 3 && cName !== '' && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String') ||
-      val._delegate ||
-      val._firestore ||
-      val._auth ||
-      val._query ||
-      val._key ||
-      val._path ||
-      val._model ||
-      val._app ||
-      val.firestore ||
-      val.auth ||
-      val.app;
+    let isCircularSdkObject = false;
+    try {
+      isCircularSdkObject =
+        cName === 'Y2' ||
+        cName === 'Ka' ||
+        cName === 'UserImpl' ||
+        cName === 'AuthImpl' ||
+        ('src' in val && 'i' in val) ||
+        ('i' in val && 'src' in val) ||
+        (val.src !== undefined && val.i !== undefined) ||
+        (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String') ||
+        val._delegate ||
+        val._firestore ||
+        val._auth ||
+        val._query ||
+        val._key ||
+        val._path ||
+        val._model ||
+        val._app ||
+        val.firestore ||
+        val.auth ||
+        val.app;
+    } catch {
+      isCircularSdkObject = true;
+    }
 
     if (isCircularSdkObject) {
       return `[SDK Class: ${cName || 'Internal'}]`;
@@ -280,8 +297,12 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       }
     }
 
-    if (val.$$typeof || val._reactName || val._dispatchInstances || val.nativeEvent) {
-      return '[React Element/Event]';
+    try {
+      if (val.$$typeof || val._reactName || val._dispatchInstances || val.nativeEvent) {
+        return '[React Element/Event]';
+      }
+    } catch {
+      // ignore
     }
 
     if (val instanceof Date) {
@@ -323,7 +344,7 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       });
     }
 
-    // For general plain objects: construct a clean object with no toJSON
+    // For general plain objects: construct a clean plain object ({}) with no prototype methods or toJSON
     const cleanObj: Record<string, any> = {};
     let keys: string[] = [];
     try {
@@ -391,14 +412,20 @@ export function safeStringify(obj: any, indent?: number): string {
           if (seenSet.has(value)) {
             return '[Circular]';
           }
-          const cName = value?.constructor?.name || '';
+          let cName = '';
+          try {
+            cName = value?.constructor?.name || '';
+          } catch {
+            cName = '';
+          }
           if (
             cName === 'Y2' ||
             cName === 'Ka' ||
-            ('src' in value && 'i' in value) ||
-            (cName.length <= 3 && cName !== '' && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date')
+            cName === 'UserImpl' ||
+            cName === 'AuthImpl' ||
+            (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date')
           ) {
-            return '[Circular/SDK]';
+            return '[SDK Class]';
           }
           try {
             seenSet.add(value);

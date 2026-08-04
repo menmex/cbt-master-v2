@@ -1198,5 +1198,87 @@ export interface CommunityAnnouncement {
   isPinned: boolean;
 }
 
+// ==========================================
+// MENCORE AI ASSISTANT SPECIFICATION (POWERED BY MENMEX)
+// ==========================================
+
+export interface MenCorePermissions {
+  websiteFeatures: boolean;
+  platformNavigation: boolean;
+  premiumPlans: boolean;
+  payments: boolean;
+  notifications: boolean;
+  accountRecovery: boolean;
+  studyMaterials: boolean;
+  community: boolean;
+  analytics: boolean;
+  academicQuestions: boolean;
+  courseQuestions: boolean;
+  universityQuestions: boolean;
+  cbtQuestions: boolean;
+  generalAI: boolean;
+}
+
+export interface MenCoreNavigationTarget {
+  label: string; // e.g. "Open Subscription Page"
+  view: string;  // e.g. "dashboard", "study-materials", "community", "leaderboard", "practice"
+  tab?: string;  // e.g. "subscription", "profile"
+}
+
+export interface MenCoreKnowledgeItem {
+  id: string;
+  title: string;
+  category: 'CBT & Practice' | 'Subscriptions & Payments' | 'Account & Profile' | 'Platform Features' | 'Study Tools & Community' | 'General';
+  keywords: string[];
+  answer: string;
+  navigationTarget?: MenCoreNavigationTarget;
+  isPinned: boolean;
+  scheduledDate?: string;
+  updatedAt: string;
+}
+
+export interface MenCoreConversationLog {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: 'student' | 'admin';
+  question: string;
+  answer: string;
+  questionType: 'platform' | 'navigation' | 'subscription' | 'academic' | 'restricted' | 'other';
+  wasHelpful?: boolean;
+  starRating?: number; // 1 to 5 ⭐⭐⭐⭐⭐
+  createdAt: string;
+  unanswered: boolean; // For Smart Suggestions
+}
+
+export interface MenCoreAnnouncementItem {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  isActive: boolean;
+  badgeCount: number;
+}
+
+export interface MenCoreSettings {
+  isEnabled: boolean;
+  showOnAuthPages: boolean;
+  maintenanceMode: boolean;
+  onlineStatus: 'online' | 'offline' | 'busy';
+  name: string;
+  subtitle: string;
+  tagline: string;
+  welcomeMessage: string;
+  typingSpeed: number;
+  responseSpeed: 'instant' | 'fast' | 'natural';
+  maxConversationLength: number;
+  avatarUrl: string;
+  themeColor: 'indigo' | 'emerald' | 'violet' | 'amber' | 'blue';
+  glowingAnimation: boolean;
+  restrictedReplyMessage: string;
+  permissions: MenCorePermissions;
+}
+
 
 
