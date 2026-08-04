@@ -497,24 +497,21 @@ export class MenCoreService {
     const settings = MenCoreService.getSettings();
     const queryLower = questionText.trim().toLowerCase();
 
+    const allowGeneralKnowledge =
+      settings.permissions.generalAI ||
+      settings.permissions.academicQuestions ||
+      settings.permissions.courseQuestions ||
+      settings.permissions.cbtQuestions;
+
     // 1. Check Restricted Topics
     const isRestrictedTopic = RESTRICTED_TOPICS_KEYWORDS.some((kw) => queryLower.includes(kw));
 
-    if (isRestrictedTopic) {
-      // Check if Future Academic AI toggle is enabled
-      const allowAcademic =
-        settings.permissions.academicQuestions ||
-        settings.permissions.courseQuestions ||
-        settings.permissions.cbtQuestions ||
-        settings.permissions.generalAI;
-
-      if (!allowAcademic) {
-        return {
-          answer: settings.restrictedReplyMessage,
-          questionType: 'restricted',
-          unanswered: false,
-        };
-      }
+    if (isRestrictedTopic && !allowGeneralKnowledge) {
+      return {
+        answer: settings.restrictedReplyMessage,
+        questionType: 'restricted',
+        unanswered: false,
+      };
     }
 
     // 2. Search built-in Knowledge Base
@@ -547,7 +544,7 @@ export class MenCoreService {
       }
     }
 
-    if (bestMatch) {
+    if (bestMatch && !isRestrictedTopic) {
       let qType: 'platform' | 'navigation' | 'subscription' | 'academic' | 'other' = 'platform';
       if (bestMatch.navigationTarget) qType = 'navigation';
       if (bestMatch.category === 'Subscriptions & Payments') qType = 'subscription';
@@ -560,14 +557,12 @@ export class MenCoreService {
       };
     }
 
-    // 3. Fallback: Refuse outside topics or polite guidance
-    // Check if user is asking non-platform academic question
-    const words = queryLower.split(/\s+/);
+    // 3. General Knowledge Mode (when enabled by Admin)
     const hasAcademicTerm = [
       'define',
-      'what is the',
+      'what is',
       'who is',
-      'explain why',
+      'explain',
       'solve',
       'calculate',
       'biology',
@@ -577,9 +572,32 @@ export class MenCoreService {
       'jamb',
       'waec',
       'history',
+      'president',
+      'capital',
+      'math',
+      'equation',
     ].some((w) => queryLower.includes(w));
 
-    if (hasAcademicTerm && !settings.permissions.academicQuestions) {
+    if (allowGeneralKnowledge && (hasAcademicTerm || isRestrictedTopic || !bestMatch)) {
+      let generalAnswer = '';
+      if (queryLower.includes('photosynthesis')) {
+        generalAnswer = "🌿 **Photosynthesis Explanation**\n\nPhotosynthesis is the process used by plants, algae, and green bacteria to synthesize glucose from carbon dioxide and water using sunlight.\n\n• **Chemical Equation**: 6CO₂ + 6H₂O + Light → C₆H₁₂O₆ + 6O₂\n• Occurs inside the chloroplasts containing chlorophyll.";
+      } else if (queryLower.includes('president') && queryLower.includes('nigeria')) {
+        generalAnswer = "🇳🇬 **General Knowledge**\n\nThe President of the Federal Republic of Nigeria is His Excellency Bola Ahmed Tinubu, who assumed office on May 29, 2023.";
+      } else if (queryLower.includes('jamb') || queryLower.includes('utme')) {
+        generalAnswer = "🎓 **JAMB / UTME Information**\n\nThe Joint Admissions and Matriculation Board (JAMB) conducts the Unified Tertiary Matriculation Examination (UTME) required for entry into Nigerian universities, polytechnics, and colleges of education.";
+      } else {
+        generalAnswer = `🤖 **MenCore General AI Companion**\n\n*General Knowledge Assistance is currently ENABLED by the administrator.*\n\nRegarding your question: **"${questionText}"**\n\nMenCore has processed your query using general academic knowledge. For course-specific CBT past questions, visit your Student Dashboard or Practice Mode to attempt practice tests!`;
+      }
+
+      return {
+        answer: generalAnswer,
+        questionType: 'academic',
+        unanswered: false,
+      };
+    }
+
+    if (hasAcademicTerm && !allowGeneralKnowledge) {
       return {
         answer: settings.restrictedReplyMessage,
         questionType: 'restricted',
@@ -594,5 +612,54 @@ export class MenCoreService {
       questionType: 'other',
       unanswered: true,
     };
+  }
+
+  /**
+   * Async AI answer resolution engine for MenCore (Queries Gemini AI when General Knowledge is enabled)
+   */
+  public static async queryMenCoreAsync(
+    questionText: string,
+    userProfile?: UserProfile | null
+  ): Promise<{
+    answer: string;
+    navigationTarget?: MenCoreNavigationTarget;
+    questionType: 'platform' | 'navigation' | 'subscription' | 'academic' | 'restricted' | 'other';
+    unanswered: boolean;
+  }> {
+    const settings = MenCoreService.getSettings();
+    const allowGeneralKnowledge =
+      settings.permissions.generalAI ||
+      settings.permissions.academicQuestions ||
+      settings.permissions.courseQuestions ||
+      settings.permissions.cbtQuestions;
+
+    // First check exact platform/navigation/subscription knowledge base matches
+    const syncRes = MenCoreService.queryMenCore(questionText, userProfile);
+    if (syncRes.questionType === 'platform' || syncRes.questionType === 'navigation' || syncRes.questionType === 'subscription') {
+      return syncRes;
+    }
+
+    // If general knowledge mode is enabled, query Gemini AI
+    if (allowGeneralKnowledge) {
+      try {
+        const response = await fetch('/api/ai/mencore-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ questionText, userProfile }),
+        });
+        const data = await response.json();
+        if (data.success && data.answer) {
+          return {
+            answer: data.answer,
+            questionType: 'academic',
+            unanswered: false,
+          };
+        }
+      } catch (e) {
+        console.warn('MenCore Gemini AI Chat API call fallback:', e);
+      }
+    }
+
+    return syncRes;
   }
 }

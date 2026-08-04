@@ -24,6 +24,7 @@ import {
   MenCoreNavigationTarget
 } from '../types';
 import { MenCoreService, DEFAULT_MENCORE_SETTINGS } from '../services/mencoreService';
+import { MenCoreAvatar } from './MenCoreLogo';
 
 interface MenCoreWidgetProps {
   currentUser?: UserProfile | null;
@@ -180,8 +181,8 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
     // Simulate natural typing delay based on admin speed settings
     const delay = settings.responseSpeed === 'instant' ? 400 : settings.responseSpeed === 'fast' ? 900 : 1500;
 
-    setTimeout(() => {
-      const res = MenCoreService.queryMenCore(textToSend.trim(), currentUser);
+    setTimeout(async () => {
+      const res = await MenCoreService.queryMenCoreAsync(textToSend.trim(), currentUser);
       const logId = `log-${Date.now()}`;
 
       // Save log
@@ -268,9 +269,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
           <div className="px-4 py-3.5 bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 text-white flex items-center justify-between border-b border-indigo-500/30">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-9 h-9 rounded-full bg-white/10 border border-white/20 flex items-center justify-center font-black text-xs shadow">
-                  <Bot className="w-5 h-5 text-amber-300" />
-                </div>
+                <MenCoreAvatar size="md" className="border-white/30" />
                 <span
                   className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
                     settings.onlineStatus === 'online'
@@ -418,9 +417,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
                 {/* Typing Indicator */}
                 {isTyping && (
                   <div className="flex items-center gap-2 text-xs text-slate-400 animate-pulse px-2">
-                    <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center">
-                      <Bot className="w-3.5 h-3.5 text-indigo-400" />
-                    </div>
+                    <MenCoreAvatar size="sm" />
                     <span className="font-medium">{settings.name || 'MenCore'} is typing...</span>
                   </div>
                 )}
@@ -520,7 +517,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
           }`}
           title="MenCore AI Assistant • Powered by Menmex (Drag to move)"
         >
-          <Bot className="w-7 h-7 text-white" />
+          <MenCoreAvatar size="lg" className="w-12 h-12 shadow-lg" />
 
           {/* Unread Announcements or Online Badge */}
           {totalBadge > 0 && !isOpen ? (

@@ -39,6 +39,27 @@ import { FeaturesPdfModal } from './components/FeaturesPdfModal';
 import { MenCoreWidget } from './components/MenCoreWidget';
 
 export default function App() {
+  // Day / Night Theme Mode State
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('cbt_theme_mode');
+    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('cbt_theme_mode', themeMode);
+    if (themeMode === 'light') {
+      document.documentElement.classList.add('light-theme');
+      document.documentElement.classList.remove('dark-theme');
+    } else {
+      document.documentElement.classList.remove('light-theme');
+      document.documentElement.classList.add('dark-theme');
+    }
+  }, [themeMode]);
+
+  const toggleThemeMode = () => {
+    setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   // Application Data State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     return StorageService.getUser() || null;
@@ -326,6 +347,8 @@ export default function App() {
         onOpenEditProfile={() => setEditProfileModalOpen(true)}
         onOpenAbout={() => setAboutModalOpen(true)}
         onOpenFeaturesPdf={() => setFeaturesPdfModalOpen(true)}
+        themeMode={themeMode}
+        onToggleTheme={toggleThemeMode}
       />
 
       {/* Main View Router */}

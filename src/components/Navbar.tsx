@@ -20,6 +20,8 @@ import {
   Crown,
   Users,
   FileText,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { getEffectiveStreak } from '../utils/streak';
 
@@ -34,6 +36,8 @@ interface NavbarProps {
   onOpenEditProfile?: () => void;
   onOpenAbout?: () => void;
   onOpenFeaturesPdf?: () => void;
+  themeMode?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -47,6 +51,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenEditProfile,
   onOpenAbout,
   onOpenFeaturesPdf,
+  themeMode = 'dark',
+  onToggleTheme,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -324,6 +330,28 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <FileText className="w-3.5 h-3.5 text-indigo-400" />
               <span>Features PDF</span>
+            </button>
+          )}
+
+          {/* Day / Night Theme Toggle */}
+          {onToggleTheme && (
+            <button
+              onClick={onToggleTheme}
+              className="px-2.5 py-1.5 text-slate-300 hover:text-white rounded-xl hover:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700/60"
+              title={themeMode === 'light' ? 'Switch to Night Mode (Black Background)' : 'Switch to Day Mode (White Background)'}
+              id="navbar-theme-toggle-btn"
+            >
+              {themeMode === 'light' ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-500 fill-amber-500/20" />
+                  <span className="text-xs font-bold text-amber-600 hidden sm:inline">Day</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-indigo-400 fill-indigo-400/20" />
+                  <span className="text-xs font-bold text-indigo-300 hidden sm:inline">Night</span>
+                </>
+              )}
             </button>
           )}
 

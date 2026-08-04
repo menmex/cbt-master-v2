@@ -252,6 +252,41 @@ Return JSON format with:
   }
 });
 
+// API Route: MenCore AI Chat (Gemini AI for General Knowledge & Outside Questions)
+app.post("/api/ai/mencore-chat", async (req, res) => {
+  try {
+    const { questionText, userProfile } = req.body;
+
+    if (!questionText || typeof questionText !== "string") {
+      return res.status(400).json({ error: "Question text is required." });
+    }
+
+    const ai = getGeminiAi();
+    const userName = userProfile?.name || "Student";
+    const systemPrompt = `You are MenCore AI (Smart MenCore, Powered by Menmex), the official intelligent CBT & Academic Companion for Acadet CBT Master.
+You are addressing ${userName}.
+You act just like Gemini AI: smart, articulate, highly knowledgeable, friendly, and comprehensive across all domains (academic subjects, science, mathematics, literature, history, technology, general knowledge, current facts, and exam preparation).
+Provide clear, structured, well-formatted answers with markdown bolding, bullet points, code blocks or mathematical formulas where appropriate.
+If the student asks a question about CBT exams or university courses, give them an accurate, encouraging, and highly detailed breakdown.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: questionText,
+      config: {
+        systemInstruction: systemPrompt,
+      },
+    });
+
+    const textAnswer = response.text || "I processed your question using MenCore Gemini AI.";
+    return res.json({ success: true, answer: textAnswer });
+  } catch (err: any) {
+    console.error("MenCore Gemini AI Chat Error:", err);
+    return res.status(500).json({
+      error: err.message || "Failed to process query via Gemini AI.",
+    });
+  }
+});
+
 // API Route: Payment Verification Simulation & Korapay Integration
 function isKorapayConfigured(): boolean {
   const secretKey = (process.env.KORAPAY_SECRET_KEY || "").trim();

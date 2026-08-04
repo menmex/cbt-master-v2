@@ -250,12 +250,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     }
 
-    // 4. Phone Number
-    if (!phone.trim()) {
-      errors.phone = 'Phone number is required.';
-    } else if (phone.trim().length < 7) {
-      errors.phone = 'Please enter a valid phone number.';
-    }
+    // 4. Phone Number (Removed requirement)
+    // Phone number field removed for streamlined registration
 
     // 5. Password
     if (!password) {
@@ -1660,39 +1656,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <p className="text-[11px] text-rose-400 mt-1 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     <span>{regErrors.email}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Phone Number */}
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Phone Number <span className="text-rose-400">*</span>
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                  <input
-                    ref={phoneRef}
-                    type="tel"
-                    placeholder="e.g. +234 801 234 5678"
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      touchRegField('phone');
-                      if (topBannerError) setTopBannerError(null);
-                    }}
-                    onBlur={() => touchRegField('phone')}
-                    className={`w-full pl-9 pr-3 py-2.5 bg-slate-950 border rounded-xl text-xs text-slate-100 focus:outline-none transition-all ${
-                      regTouched.phone && regErrors.phone
-                        ? 'border-rose-500 bg-rose-500/5 focus:border-rose-500'
-                        : 'border-slate-800 focus:border-indigo-500'
-                    }`}
-                  />
-                </div>
-                {regTouched.phone && regErrors.phone && (
-                  <p className="text-[11px] text-rose-400 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    <span>{regErrors.phone}</span>
                   </p>
                 )}
               </div>
