@@ -18,6 +18,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getEffectiveStreak, getLast7DaysStreakStatus } from '../utils/streak';
+import { ReferralSection } from './ReferralSection';
 
 interface StudentDashboardProps {
   user: UserProfile;
@@ -600,6 +601,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
 
       </div>
+
+      {/* Real-Time Referral Tracking System Section */}
+      <ReferralSection user={user} />
 
     </div>
   );

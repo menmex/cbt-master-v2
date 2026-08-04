@@ -30,6 +30,10 @@ export interface UserProfile {
   purchasedMaterialIds?: string[]; // Material IDs user paid 500 NGN for
   seenQuestionIds?: string[]; // Question IDs user has practiced
   createdDate: string;
+  referralCode?: string;
+  successfulReferrals?: number;
+  referredBy?: string; // User ID of the referrer
+  referredByCode?: string; // Referral code used at signup
   streakCount?: number;
   lastPracticeDate?: string;
   streakHistory?: string[];

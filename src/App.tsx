@@ -50,9 +50,11 @@ export default function App() {
     if (themeMode === 'light') {
       document.documentElement.classList.add('light-theme');
       document.documentElement.classList.remove('dark-theme');
+      document.documentElement.classList.remove('dark');
     } else {
       document.documentElement.classList.remove('light-theme');
       document.documentElement.classList.add('dark-theme');
+      document.documentElement.classList.add('dark');
     }
   }, [themeMode]);
 

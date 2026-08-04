@@ -51,7 +51,19 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
   const [settings, setSettings] = useState<MenCoreSettings>(MenCoreService.getSettings());
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(() => !document.documentElement.classList.contains('light-theme'));
+
+  // Sync with global theme class changes
+  useEffect(() => {
+    const checkTheme = () => {
+      const isLight = document.documentElement.classList.contains('light-theme');
+      setIsDarkMode(!isLight);
+    };
+    checkTheme();
+    const observer = new MutationObserver(checkTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [announcements, setAnnouncements] = useState<MenCoreAnnouncementItem[]>(MenCoreService.getAnnouncements());

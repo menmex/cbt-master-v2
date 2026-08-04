@@ -41,6 +41,7 @@ import {
 } from '../types';
 
 import { auth, db } from '../lib/firebase';
+import { ensureReferralFields } from '../utils/referrals';
 import {
   collection,
   doc,
@@ -116,19 +117,24 @@ export function stripNonSerializable(val: any, seen = new WeakSet<any>(), depth 
     }
 
     const cName = val?.constructor?.name || '';
-    const isSdk =
-      cName === 'Y2' ||
-      cName === 'Ka' ||
-      ('src' in val && 'i' in val) ||
-      val._delegate ||
-      val._firestore ||
-      val._auth ||
-      val._query ||
-      val._key ||
-      val._path ||
-      val.firestore ||
-      val.auth ||
-      val.app;
+    let isSdk = false;
+    try {
+      isSdk =
+        cName === 'Y2' ||
+        cName === 'Ka' ||
+        cName === 'UserImpl' ||
+        cName === 'AuthImpl' ||
+        (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date') ||
+        ('_delegate' in val) ||
+        ('_firestore' in val) ||
+        ('_auth' in val) ||
+        ('_query' in val) ||
+        ('_key' in val) ||
+        ('_path' in val) ||
+        ('src' in val && 'i' in val);
+    } catch {
+      isSdk = true;
+    }
 
     if (isSdk) {
       return `[SDK Class: ${cName || 'Internal'}]`;
@@ -247,21 +253,19 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         cName === 'Ka' ||
         cName === 'UserImpl' ||
         cName === 'AuthImpl' ||
-        ('src' in val && 'i' in val) ||
-        ('i' in val && 'src' in val) ||
-        (val.src !== undefined && val.i !== undefined) ||
-        (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String') ||
-        val._delegate ||
-        val._firestore ||
-        val._auth ||
-        val._query ||
-        val._key ||
-        val._path ||
-        val._model ||
-        val._app ||
-        val.firestore ||
-        val.auth ||
-        val.app;
+        (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String');
+      if (!isCircularSdkObject) {
+        try {
+          if ('src' in val || ('i' in val && typeof val.i === 'object')) isCircularSdkObject = true;
+        } catch {}
+      }
+      if (!isCircularSdkObject) {
+        try {
+          if ('_delegate' in val || '_firestore' in val || '_auth' in val || '_query' in val || '_key' in val || '_path' in val || '_model' in val || '_app' in val) {
+            isCircularSdkObject = true;
+          }
+        } catch {}
+      }
     } catch {
       isCircularSdkObject = true;
     }
@@ -441,7 +445,23 @@ export function safeStringify(obj: any, indent?: number): string {
   } catch (err) {
     try {
       const stripped = stripNonSerializable(obj);
-      return JSON.stringify(stripped, null, indent) || '{}';
+      const seenSet = new WeakSet();
+      return (
+        JSON.stringify(
+          stripped,
+          (key, value) => {
+            if (key === 'toJSON') return undefined;
+            if (typeof value === 'object' && value !== null) {
+              if (seenSet.has(value)) return '[Circular]';
+              try {
+                seenSet.add(value);
+              } catch {}
+            }
+            return typeof value === 'function' || typeof value === 'symbol' ? undefined : value;
+          },
+          indent
+        ) || '{}'
+      );
     } catch {
       return '{}';
     }
@@ -453,12 +473,13 @@ export function safeClone<T>(obj: T): T {
   try {
     const clean = sanitizeForJSON(obj);
     const jsonStr = safeStringify(clean);
-    if (jsonStr === 'undefined' || jsonStr === 'null' || !jsonStr) return obj;
+    if (jsonStr === 'undefined' || jsonStr === 'null' || !jsonStr || jsonStr === '{}') return obj;
     return JSON.parse(jsonStr);
   } catch (err) {
     try {
       const stripped = stripNonSerializable(obj);
-      return JSON.parse(JSON.stringify(stripped));
+      const jsonStr = safeStringify(stripped);
+      return JSON.parse(jsonStr);
     } catch {
       return (Array.isArray(obj) ? [] : {}) as T;
     }
@@ -950,7 +971,9 @@ export class StorageService {
   private static setItem<T>(key: string, value: T): void {
     try {
       localStorage.setItem(key, safeStringify(value));
-      window.dispatchEvent(new CustomEvent('cbt_storage_change', { detail: { key, timestamp: Date.now() } }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('cbt_storage_change', { detail: { key, timestamp: Date.now() } }));
+      }, 0);
     } catch (e) {
       console.error('Storage write error:', e);
     }
@@ -979,7 +1002,8 @@ export class StorageService {
     const rawUsers = this.getItem<UserProfile[]>(STORAGE_KEYS.USERS, [DEFAULT_USER]);
     let hasChanges = false;
     const updatedUsers = rawUsers.map((u) => {
-      const checked = this.enforceSubscriptionExpiry(u);
+      let checked = this.enforceSubscriptionExpiry(u);
+      checked = ensureReferralFields(checked, rawUsers);
       if (checked !== u) hasChanges = true;
       return checked;
     });
@@ -1031,7 +1055,8 @@ export class StorageService {
     const updatedRecord = users.find((u) => u.id === rawUser.id);
     const targetUser = updatedRecord || rawUser;
 
-    const checked = this.enforceSubscriptionExpiry(targetUser);
+    let checked = this.enforceSubscriptionExpiry(targetUser);
+    checked = ensureReferralFields(checked, users);
     if (safeStringify(checked) !== safeStringify(rawUser)) {
       this.setItem(STORAGE_KEYS.USER, checked);
     }
@@ -1047,40 +1072,46 @@ export class StorageService {
   }
 
   static saveUser(user: UserProfile): void {
+    const users = this.getUsers();
+    const userWithReferral = ensureReferralFields(user, users);
+
     const activeSessionUser = this.getItem<UserProfile | null>(STORAGE_KEYS.USER, null);
-    if (!activeSessionUser || activeSessionUser.id === user.id) {
-      this.setItem(STORAGE_KEYS.USER, user);
+    if (!activeSessionUser || activeSessionUser.id === userWithReferral.id) {
+      this.setItem(STORAGE_KEYS.USER, userWithReferral);
     }
 
-    const users = this.getUsers();
-    const idx = users.findIndex((u) => u.id === user.id);
+    const idx = users.findIndex((u) => u.id === userWithReferral.id);
     if (idx >= 0) {
-      users[idx] = user;
+      users[idx] = userWithReferral;
     } else {
-      users.unshift(user);
+      users.unshift(userWithReferral);
     }
     this.setItem(STORAGE_KEYS.USERS, users);
 
     // Secure Firestore Sync
     try {
-      if (user && user.id) {
+      if (userWithReferral && userWithReferral.id) {
         setDoc(
-          doc(db, 'users', user.id),
+          doc(db, 'users', userWithReferral.id),
           safeClone({
-            fullName: user.name,
-            username: user.username || '',
-            email: user.email,
-            phone: user.phone || '',
-            role: user.role,
-            universityName: user.universityName || '',
-            departmentName: user.departmentName || '',
-            subscription: user.subscription,
-            bookmarks: user.bookmarks || [],
-            createdDate: user.createdDate,
+            fullName: userWithReferral.name,
+            username: userWithReferral.username || '',
+            email: userWithReferral.email,
+            phone: userWithReferral.phone || '',
+            role: userWithReferral.role,
+            universityName: userWithReferral.universityName || '',
+            departmentName: userWithReferral.departmentName || '',
+            subscription: userWithReferral.subscription,
+            bookmarks: userWithReferral.bookmarks || [],
+            createdDate: userWithReferral.createdDate,
+            referralCode: userWithReferral.referralCode || '',
+            successfulReferrals: userWithReferral.successfulReferrals ?? 0,
+            referredBy: userWithReferral.referredBy || '',
+            referredByCode: userWithReferral.referredByCode || '',
             updatedAt: new Date().toISOString(),
           }),
           { merge: true }
-        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${user.id}`));
+        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `users/${userWithReferral.id}`));
       }
     } catch (e) {
       console.warn('Firestore write user error:', e);

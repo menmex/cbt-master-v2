@@ -103,7 +103,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-slate-100 shadow-sm" id="cbt-navbar">
+      <header className={`sticky top-0 z-40 backdrop-blur-md border-b shadow-sm transition-colors duration-200 ${
+        themeMode === 'light'
+          ? 'bg-white/95 border-slate-200 text-slate-900'
+          : 'bg-slate-900/95 border-slate-800 text-slate-100'
+      }`} id="cbt-navbar">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
         {/* Brand Logo */}
@@ -117,13 +121,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
           <div>
             <div className="flex items-center space-x-1.5">
-              <span className="font-extrabold text-lg tracking-tight text-white">Acadet CBT MASTER</span>
-              <span className="bg-indigo-500/20 text-indigo-300 text-xs font-semibold px-2 py-0.5 rounded-full border border-indigo-500/30 flex items-center gap-1 hidden lg:flex">
-                <Sparkles className="w-3 h-3 text-indigo-400" />
+              <span className={`font-extrabold text-lg tracking-tight transition-colors ${
+                themeMode === 'light' ? 'text-slate-900' : 'text-white'
+              }`}>
+                Acadet CBT MASTER
+              </span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1 hidden lg:flex ${
+                themeMode === 'light'
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                  : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+              }`}>
+                <Sparkles className={`w-3 h-3 ${themeMode === 'light' ? 'text-indigo-600' : 'text-indigo-400'}`} />
                 Sim
               </span>
             </div>
-            <p className="text-[10px] text-slate-400 hidden sm:block">Modern University Learning & CBT Practice Engine</p>
+            <p className={`text-[10px] font-medium hidden sm:block ${
+              themeMode === 'light' ? 'text-slate-600' : 'text-slate-400'
+            }`}>
+              Modern University Learning & CBT Practice Engine
+            </p>
           </div>
         </div>
 
@@ -136,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('dashboard')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'dashboard' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'dashboard' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-dashboard"
                   >
@@ -145,7 +161,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('practice')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'practice' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'practice' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-practice"
                   >
@@ -154,27 +170,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('mock_cbt')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                      activeTab === 'mock_cbt' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'mock_cbt' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-mock-cbt"
                   >
-                    <BookOpen className="w-4 h-4 text-emerald-400" />
+                    <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     Mock CBT
                   </button>
                   <button
                     onClick={() => onNavigate('community')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                      activeTab === 'community' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'community' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-community"
                   >
-                    <Users className="w-4 h-4 text-indigo-400" />
+                    <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                     <span>Learning Community</span>
                   </button>
                   <button
                     onClick={() => onNavigate('materials')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'materials' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'materials' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-materials"
                   >
@@ -183,7 +199,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('leaderboard')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'leaderboard' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'leaderboard' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-leaderboard"
                   >
@@ -192,7 +208,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('performance')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'performance' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'performance' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-performance"
                   >
@@ -201,7 +217,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     onClick={() => onNavigate('bookmarks')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeTab === 'bookmarks' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      activeTab === 'bookmarks' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                     id="nav-btn-bookmarks"
                   >

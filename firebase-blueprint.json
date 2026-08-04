@@ -15,7 +15,11 @@
         "departmentName": { "type": "string", "maxLength": 150 },
         "subscription": { "type": "object" },
         "bookmarks": { "type": "array" },
-        "createdDate": { "type": "string" }
+        "createdDate": { "type": "string" },
+        "referralCode": { "type": "string", "maxLength": 20 },
+        "successfulReferrals": { "type": "number", "minimum": 0 },
+        "referredBy": { "type": "string" },
+        "referredByCode": { "type": "string" }
       },
       "required": ["id", "email", "role"]
     },

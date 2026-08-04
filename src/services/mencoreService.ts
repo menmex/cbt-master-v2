@@ -6,7 +6,7 @@ import {
   UserProfile,
   MenCoreNavigationTarget
 } from '../types';
-import { StorageService, safeStringify } from './storage';
+import { StorageService, safeStringify, sanitizeForJSON } from './storage';
 
 const STORAGE_KEY_SETTINGS = 'cbt_mencore_settings_v1';
 const STORAGE_KEY_KB = 'cbt_mencore_kb_v1';
@@ -645,7 +645,7 @@ export class MenCoreService {
         const response = await fetch('/api/ai/mencore-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ questionText, userProfile }),
+          body: safeStringify({ questionText, userProfile: userProfile ? sanitizeForJSON(userProfile) : null }),
         });
         const data = await response.json();
         if (data.success && data.answer) {

@@ -34,6 +34,7 @@ import { AuditComplianceModule } from './admin/AuditComplianceModule';
 import { SecurityAccessModule } from './admin/SecurityAccessModule';
 import { TopicRequestManagementModule } from './admin/TopicRequestManagementModule';
 import { MenCoreManagementModule } from './admin/MenCoreManagementModule';
+import { ReferralManagementModule } from './admin/ReferralManagementModule';
 import {
   Shield,
   BookOpen,
@@ -88,7 +89,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   FileUp,
-  ChevronDown
+  ChevronDown,
+  Share2
 } from 'lucide-react';
 
 export type AdminCategory =
@@ -113,7 +115,8 @@ export type AdminCategory =
   | 'audit_compliance'
   | 'security_access'
   | 'topic_requests'
-  | 'mencore_ai';
+  | 'mencore_ai'
+  | 'referral_management';
 
 export type AdminRole =
   | 'Super Administrator'
@@ -186,6 +189,7 @@ export const CATEGORY_REQUIRED_PERMISSIONS: Record<string, string> = {
   security_access: 'manage_settings',
   topic_requests: 'manage_study_materials',
   mencore_ai: 'manage_settings',
+  referral_management: 'manage_students',
 };
 
 interface AdminDashboardProps {
@@ -1214,11 +1218,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {activeCategory === 'security_access' && 'Security & Access Control'}
                 {activeCategory === 'topic_requests' && 'Community Learning & Topic Requests'}
                 {activeCategory === 'mencore_ai' && 'MenCore AI System & Joyce Tutor Studio'}
+                {activeCategory === 'referral_management' && 'Referral System & Influencer Tracking'}
               </h1>
             </div>
             <p className="text-xs text-slate-400 mt-1">
               {activeCategory === null
-                ? 'Central monitoring hub: 20 real-time management categories connected live to Cloud Firestore.'
+                ? 'Central monitoring hub: 23 real-time management categories connected live to Cloud Firestore.'
                 : 'Dedicated control interface. Use the category selector to switch or back to main.'}
             </p>
           </div>
@@ -1257,6 +1262,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ['security_access', '20. Security & Access Control'],
                   ['topic_requests', '21. Community Learning & Topic Requests'],
                   ['mencore_ai', '22. MenCore AI System & Joyce Tutor Studio'],
+                  ['referral_management', '23. Referral System & Influencer Tracking'],
                 ] as [AdminCategory, string][]
               ).map(([catKey, label]) => {
                 const acc = checkCategoryAccess(catKey);
@@ -1307,7 +1313,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   'students', 'universities', 'courses', 'questions', 'review_workflow',
                   'study_materials', 'notifications', 'leaderboard', 'payments', 'question_analytics',
                   'ai_generator_history', 'backup_restore', 'activity_logs', 'roles_permissions',
-                  'reports', 'system_health', 'feedback_support', 'audit_compliance', 'security_access', 'topic_requests', 'mencore_ai'
+                  'reports', 'system_health', 'feedback_support', 'audit_compliance', 'security_access', 'topic_requests', 'mencore_ai', 'referral_management'
                 ] as AdminCategory[]
               ).map((catKey) => {
                 if (!catKey) return null;
@@ -1512,6 +1518,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
 
               <button
+                onClick={() => setActiveCategory('referral_management')}
+                className="bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-indigo-500/50 p-4 rounded-xl text-left transition-all cursor-pointer group shadow-sm"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[11px] text-slate-400 font-medium">Referral System</span>
+                  <span className="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded">Tracking</span>
+                </div>
+                <p className="text-xl font-black text-white mt-1 group-hover:text-indigo-300 transition-colors">
+                  {studentsList.reduce((acc, u) => acc + (u.successfulReferrals || 0), 0)}
+                </p>
+                <span className="text-[10px] text-indigo-400 font-medium mt-1 block">Total Sign-up Referrals</span>
+              </button>
+
+              <button
                 onClick={() => setActiveCategory('system_health')}
                 className="bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-500/50 p-4 rounded-xl text-left transition-all cursor-pointer group shadow-sm"
               >
@@ -1598,6 +1618,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <Sparkles className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
                 <span className="text-xs font-bold text-slate-200">MenCore AI</span>
               </button>
+
+              <button
+                onClick={() => handleQuickActionWithPermission('manage_students', () => setActiveCategory('referral_management'), 'Referral System')}
+                className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 rounded-xl transition-all text-left flex flex-col justify-between h-24 group cursor-pointer"
+              >
+                <Share2 className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" />
+                <span className="text-xs font-bold text-slate-200">Referral System</span>
+              </button>
             </div>
           </div>
 
@@ -1618,6 +1646,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { id: 'study_materials', title: 'Study Materials', desc: 'Upload PDFs, notes & video lecture links for students.', icon: Upload, color: 'text-pink-400', border: 'hover:border-pink-500' },
                 { id: 'notifications', title: 'Notifications & Announcements', desc: 'Create, schedule & broadcast target announcements.', icon: Bell, color: 'text-yellow-400', border: 'hover:border-yellow-500' },
                 { id: 'leaderboard', title: 'Leaderboard & Rankings', desc: 'High scores, speed rankings, university & course stats.', icon: Trophy, color: 'text-amber-300', border: 'hover:border-amber-400' },
+                { id: 'referral_management', title: 'Referral System & Influencer Tracking', desc: 'Track student referral codes, successful sign-up referrals & leaderboards.', icon: Share2, color: 'text-indigo-400', border: 'hover:border-indigo-500' },
                 { id: 'payments', title: 'Payment Management', desc: 'View transactions, approve payments & revenue reports.', icon: CreditCard, color: 'text-emerald-400', border: 'hover:border-emerald-500' },
                 { id: 'question_analytics', title: 'Question Analytics', desc: 'Most failed questions, average scores & difficulty stats.', icon: BarChart3, color: 'text-sky-400', border: 'hover:border-sky-500' },
                 { id: 'ai_generator_history', title: 'Smart Question Generator History', desc: 'View generated question batches & regenerate history.', icon: Brain, color: 'text-indigo-400', border: 'hover:border-indigo-500' },
@@ -3967,6 +3996,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* --- MenCore AI System Management & Joyce Tutor Studio --- */}
       {activeCategory === 'mencore_ai' && (
         <MenCoreManagementModule />
+      )}
+
+      {/* --- Referral Management & Leaderboard Tracking --- */}
+      {activeCategory === 'referral_management' && (
+        <ReferralManagementModule />
       )}
 
       {/* Role Permissions Matrix Modal */}

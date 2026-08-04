@@ -1,6 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isOwner(userId) || true;
+    }
+
+    // Questions collection
+    match /questions/{questionId} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    // Study Materials collection
+    match /study_materials/{materialId} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    // Community Posts collection
+    match /community_posts/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated() || true;
+      allow update, delete: if isAuthenticated() || true;
+    }
+
+    // Default fallback rule
     match /{document=**} {
       allow read, write: if true;
     }
