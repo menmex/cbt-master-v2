@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile } from '../../types';
+import { UserProfile, ReferralLeaderboardConfig } from '../../types';
 import { StorageService } from '../../services/storage';
 import {
   Share2,
@@ -17,32 +17,47 @@ import {
   Filter,
   CheckCircle2,
   HelpCircle,
+  Download,
+  RotateCcw,
+  Settings,
+  AlertTriangle,
+  Check,
+  Sliders,
+  Power,
+  Save,
 } from 'lucide-react';
 
 export const ReferralManagementModule: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [config, setConfig] = useState<ReferralLeaderboardConfig>(() =>
+    StorageService.getReferralLeaderboardConfig()
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [minFilter, setMinFilter] = useState<'all' | 'active'>('all');
   const [selectedReferrer, setSelectedReferrer] = useState<UserProfile | null>(null);
 
-  // Load and subscribe to real-time users list
+  // Modal State
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Load and subscribe to real-time users list & config
   useEffect(() => {
-    const loadUsers = () => {
-      const allUsers = StorageService.getUsers();
-      setUsers(allUsers);
+    const loadData = () => {
+      setUsers(StorageService.getUsers());
+      setConfig(StorageService.getReferralLeaderboardConfig());
     };
 
-    loadUsers();
+    loadData();
 
     const handleStorageChange = () => {
-      loadUsers();
+      loadData();
     };
 
     window.addEventListener('cbt_storage_change', handleStorageChange);
     window.addEventListener('storage', handleStorageChange);
 
-    // Refresh every 3 seconds to keep real-time sync snappy
-    const interval = setInterval(loadUsers, 3000);
+    const interval = setInterval(loadData, 3000);
 
     return () => {
       window.removeEventListener('cbt_storage_change', handleStorageChange);
@@ -51,23 +66,39 @@ export const ReferralManagementModule: React.FC = () => {
     };
   }, []);
 
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   // Compute Metrics
-  const totalReferrals = users.reduce((sum, u) => sum + (u.successfulReferrals || 0), 0);
+  const totalCompletedReferrals = users.reduce(
+    (sum, u) => sum + (u.completedReferrals ?? u.successfulReferrals ?? 0),
+    0
+  );
   const usersWithCodeCount = users.filter((u) => Boolean(u.referralCode)).length;
-  const activeReferrers = users.filter((u) => (u.successfulReferrals || 0) > 0);
+  const activeReferrers = users.filter(
+    (u) => (u.completedReferrals ?? u.successfulReferrals ?? 0) > 0
+  );
   const activeReferrersCount = activeReferrers.length;
 
-  // Sorted Leaderboard (highest successfulReferrals first)
-  const sortedLeaderboard = [...users]
-    .sort((a, b) => (b.successfulReferrals || 0) - (a.successfulReferrals || 0));
+  // Sorted Leaderboard (highest completedReferrals first)
+  const sortedLeaderboard = [...users].sort((a, b) => {
+    const cA = a.completedReferrals ?? a.successfulReferrals ?? 0;
+    const cB = b.completedReferrals ?? b.successfulReferrals ?? 0;
+    return cB - cA;
+  });
 
   // Filtered List
   const filteredUsers = sortedLeaderboard.filter((u) => {
-    const matchesMin = minFilter === 'active' ? (u.successfulReferrals || 0) > 0 : true;
+    const count = u.completedReferrals ?? u.successfulReferrals ?? 0;
+    const matchesMin = minFilter === 'active' ? count > 0 : true;
     const q = searchQuery.toLowerCase().trim();
+    const username = u.username || u.email?.split('@')[0] || '';
     const matchesSearch =
       !q ||
       u.name.toLowerCase().includes(q) ||
+      username.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q) ||
       (u.referralCode && u.referralCode.toLowerCase().includes(q)) ||
       (u.universityName && u.universityName.toLowerCase().includes(q));
@@ -79,8 +110,84 @@ export const ReferralManagementModule: React.FC = () => {
     ? users.filter((u) => u.referredBy === selectedReferrer.id)
     : [];
 
+  // Save Settings handler
+  const handleSaveConfig = () => {
+    StorageService.saveReferralLeaderboardConfig(config);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+    showToast('✅ Referral Leaderboard configuration saved successfully!');
+  };
+
+  // Reset Rankings handler
+  const handleConfirmReset = () => {
+    StorageService.resetReferralRankings();
+    setShowResetModal(false);
+    setUsers(StorageService.getUsers());
+    showToast('⚠️ Referral Leaderboard rankings have been reset to 0 across all accounts.');
+  };
+
+  // Export Leaderboard to CSV
+  const handleExportCSV = () => {
+    if (sortedLeaderboard.length === 0) {
+      showToast('No user data available to export.');
+      return;
+    }
+
+    const headers = [
+      'Rank',
+      'Full Name',
+      'Username',
+      'Email',
+      'University',
+      'Department',
+      'Referral Code',
+      'Completed Referrals',
+      'Joined Date',
+    ];
+
+    const rows = sortedLeaderboard.map((u, idx) => {
+      const completed = u.completedReferrals ?? u.successfulReferrals ?? 0;
+      const username = u.username || u.email?.split('@')[0] || 'student';
+      return [
+        idx + 1,
+        `"${(u.name || '').replace(/"/g, '""')}"`,
+        `"${username.replace(/"/g, '""')}"`,
+        `"${(u.email || '').replace(/"/g, '""')}"`,
+        `"${(u.universityName || 'N/A').replace(/"/g, '""')}"`,
+        `"${(u.departmentName || 'N/A').replace(/"/g, '""')}"`,
+        `"${u.referralCode || ''}"`,
+        completed,
+        `"${new Date(u.createdDate).toLocaleDateString()}"`,
+      ].join(',');
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute(
+      'download',
+      `Acadet_CBT_Referral_Leaderboard_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast('📥 Referral Leaderboard exported to CSV successfully!');
+  };
+
   return (
     <div className="space-y-6" id="admin-referral-management-module">
+      {/* Toast Banner */}
+      {toastMessage && (
+        <div className="fixed top-5 right-5 z-50 bg-slate-900 border border-indigo-500/50 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-fade-in">
+          <Sparkles className="w-5 h-5 text-indigo-400 shrink-0" />
+          <span className="text-xs font-bold">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -92,33 +199,55 @@ export const ReferralManagementModule: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-black text-white tracking-tight">Referral Management & Tracking</h2>
+                <h2 className="text-2xl font-black text-white tracking-tight">
+                  Referral Management & Leaderboard Control
+                </h2>
                 <span className="text-[10px] uppercase font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                   <Sparkles className="w-3 h-3" /> Live Real-Time
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 max-w-xl">
-                Real-time tracking of student referrals across CBT Master. Track unique referral codes, referral links, and student acquisition counts.
+                Control the student Referral Leaderboard, toggle visibility across Home Page and User Dashboard, monitor real-time referral signups, export data, or execute cycle resets.
               </p>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={handleExportCSV}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all border border-slate-700 flex items-center gap-2 shadow-md cursor-pointer"
+              id="admin-export-referral-csv-btn"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>Export CSV</span>
+            </button>
+
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="px-4 py-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md cursor-pointer"
+              id="admin-reset-referrals-btn"
+            >
+              <RotateCcw className="w-4 h-4 text-rose-400" />
+              <span>Reset Rankings</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Analytics Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Successful Referrals */}
+        {/* Total Completed Referrals */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-indigo-500/40 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Total Referrals
+              Completed Referrals
             </span>
             <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl">
               <UserCheck className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-extrabold text-white tracking-tight">{totalReferrals}</p>
-          <p className="text-[11px] text-slate-500 mt-1">Total successful sign-ups via referral</p>
+          <p className="text-3xl font-extrabold text-white tracking-tight">{totalCompletedReferrals}</p>
+          <p className="text-[11px] text-slate-500 mt-1">Total completed student sign-ups</p>
         </div>
 
         {/* Active Referrers */}
@@ -132,10 +261,10 @@ export const ReferralManagementModule: React.FC = () => {
             </div>
           </div>
           <p className="text-3xl font-extrabold text-emerald-300 tracking-tight">{activeReferrersCount}</p>
-          <p className="text-[11px] text-slate-500 mt-1">Users with ≥1 successful referral</p>
+          <p className="text-[11px] text-slate-500 mt-1">Students with ≥1 completed referral</p>
         </div>
 
-        {/* Registered User Codes */}
+        {/* Assigned Codes */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-indigo-500/40 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -146,7 +275,7 @@ export const ReferralManagementModule: React.FC = () => {
             </div>
           </div>
           <p className="text-3xl font-extrabold text-purple-300 tracking-tight">{usersWithCodeCount}</p>
-          <p className="text-[11px] text-slate-500 mt-1">Permanent codes generated</p>
+          <p className="text-[11px] text-slate-500 mt-1">Permanent unique codes generated</p>
         </div>
 
         {/* Top Referrer */}
@@ -159,14 +288,108 @@ export const ReferralManagementModule: React.FC = () => {
               <Trophy className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-xl font-bold text-amber-300 truncate">
-            {sortedLeaderboard[0]?.successfulReferrals ? sortedLeaderboard[0].name : 'N/A'}
+          <p className="text-lg font-extrabold text-amber-300 truncate">
+            {sortedLeaderboard[0] &&
+            (sortedLeaderboard[0].completedReferrals ?? sortedLeaderboard[0].successfulReferrals ?? 0) > 0
+              ? sortedLeaderboard[0].name
+              : 'N/A'}
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            {sortedLeaderboard[0]?.successfulReferrals
-              ? `${sortedLeaderboard[0].successfulReferrals} Successful Referrals`
+            {sortedLeaderboard[0] &&
+            (sortedLeaderboard[0].completedReferrals ?? sortedLeaderboard[0].successfulReferrals ?? 0) > 0
+              ? `${sortedLeaderboard[0].completedReferrals ?? sortedLeaderboard[0].successfulReferrals} Completed Referrals`
               : 'No referrals recorded yet'}
           </p>
+        </div>
+      </div>
+
+      {/* Leaderboard Settings & Visibility Control Panel */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+              <Sliders className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Leaderboard Visibility & System Settings</h3>
+              <p className="text-xs text-slate-400">Manage where the Referral Leaderboard appears across the application.</p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleSaveConfig}
+            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer ${
+              saveSuccess
+                ? 'bg-emerald-500 text-white'
+                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg'
+            }`}
+            id="admin-save-referral-config-btn"
+          >
+            {saveSuccess ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+            <span>{saveSuccess ? 'Saved!' : 'Save Settings'}</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+          {/* Global Enable Switch */}
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-white block">Enable Leaderboard System</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">Global on/off toggle</span>
+            </div>
+            <button
+              onClick={() => setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+              className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                config.enabled ? 'bg-indigo-600' : 'bg-slate-800'
+              }`}
+            >
+              <span
+                className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+                  config.enabled ? 'right-0.5' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Homepage Visibility Switch */}
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-white block">Display on Home Page</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">Show section on homepage</span>
+            </div>
+            <button
+              onClick={() => setConfig((prev) => ({ ...prev, showOnHomepage: !prev.showOnHomepage }))}
+              className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                config.showOnHomepage ? 'bg-indigo-600' : 'bg-slate-800'
+              }`}
+            >
+              <span
+                className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+                  config.showOnHomepage ? 'right-0.5' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* User Dashboard Visibility Switch */}
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-white block">Display on User Dashboard</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">Show card on student dashboard</span>
+            </div>
+            <button
+              onClick={() => setConfig((prev) => ({ ...prev, showOnDashboard: !prev.showOnDashboard }))}
+              className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                config.showOnDashboard ? 'bg-indigo-600' : 'bg-slate-800'
+              }`}
+            >
+              <span
+                className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
+                  config.showOnDashboard ? 'right-0.5' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -179,14 +402,14 @@ export const ReferralManagementModule: React.FC = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search name, email, code..."
+            placeholder="Search name, username, email, code..."
             className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             id="admin-referral-search-input"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-2.5 text-slate-500 hover:text-white text-xs"
+              className="absolute right-3 top-2.5 text-slate-500 hover:text-white text-xs cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -206,7 +429,7 @@ export const ReferralManagementModule: React.FC = () => {
                 : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
-            All Users ({users.length})
+            All Accounts ({users.length})
           </button>
           <button
             onClick={() => setMinFilter('active')}
@@ -226,10 +449,10 @@ export const ReferralManagementModule: React.FC = () => {
         <div className="p-5 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-400" />
-            <h3 className="font-bold text-white text-base">Referral Leaderboard</h3>
+            <h3 className="font-bold text-white text-base">Referral Leaderboard Standings</h3>
           </div>
           <span className="text-xs text-slate-400">
-            Showing {filteredUsers.length} of {users.length} accounts
+            Showing {filteredUsers.length} of {users.length} registered accounts
           </span>
         </div>
 
@@ -239,9 +462,9 @@ export const ReferralManagementModule: React.FC = () => {
               <tr>
                 <th className="py-3.5 px-4 text-center">Rank</th>
                 <th className="py-3.5 px-4">Student Info</th>
-                <th className="py-3.5 px-4">University & Dept</th>
+                <th className="py-3.5 px-4">Username</th>
                 <th className="py-3.5 px-4">Referral Code</th>
-                <th className="py-3.5 px-4 text-center">Successful Referrals</th>
+                <th className="py-3.5 px-4 text-center">Completed Referrals</th>
                 <th className="py-3.5 px-4 text-center">Action</th>
               </tr>
             </thead>
@@ -254,8 +477,14 @@ export const ReferralManagementModule: React.FC = () => {
                 </tr>
               ) : (
                 filteredUsers.map((u, index) => {
-                  const referrals = u.successfulReferrals || 0;
+                  const referrals = u.completedReferrals ?? u.successfulReferrals ?? 0;
                   const rank = index + 1;
+                  const displayUsername = u.username
+                    ? `@${u.username.replace(/^@/, '')}`
+                    : u.email
+                    ? `@${u.email.split('@')[0]}`
+                    : '@student';
+
                   return (
                     <tr
                       key={u.id}
@@ -264,19 +493,19 @@ export const ReferralManagementModule: React.FC = () => {
                       {/* Rank */}
                       <td className="py-4 px-4 text-center font-bold">
                         {rank === 1 ? (
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-black">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 font-black">
                             🥇 1
                           </span>
                         ) : rank === 2 ? (
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300/20 text-slate-200 border border-slate-300/40 font-black">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-xl bg-slate-300/20 text-slate-200 border border-slate-300/40 font-black">
                             🥈 2
                           </span>
                         ) : rank === 3 ? (
-                          <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700/20 text-amber-400 border border-amber-700/40 font-black">
+                          <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-xl bg-amber-700/20 text-amber-400 border border-amber-700/40 font-black">
                             🥉 3
                           </span>
                         ) : (
-                          <span className="text-slate-500 font-mono">#{rank}</span>
+                          <span className="text-slate-500 font-mono font-bold">#{rank}</span>
                         )}
                       </td>
 
@@ -290,24 +519,19 @@ export const ReferralManagementModule: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* University & Dept */}
-                      <td className="py-4 px-4">
-                        <div className="text-slate-300 font-medium truncate max-w-[180px]">
-                          {u.universityName || 'Not Specified'}
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate max-w-[180px]">
-                          {u.departmentName || 'General'}
-                        </div>
+                      {/* Username */}
+                      <td className="py-4 px-4 font-mono text-indigo-400 font-semibold">
+                        {displayUsername}
                       </td>
 
                       {/* Referral Code */}
-                      <td className="py-4 px-4 font-mono font-bold text-indigo-400 tracking-wider">
+                      <td className="py-4 px-4 font-mono font-bold text-indigo-300 tracking-wider">
                         <span className="bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20">
                           {u.referralCode || 'CBT8XK92'}
                         </span>
                       </td>
 
-                      {/* Successful Referrals */}
+                      {/* Completed Referrals */}
                       <td className="py-4 px-4 text-center">
                         <span
                           className={`inline-flex items-center gap-1 px-3 py-1 rounded-full font-extrabold text-xs ${
@@ -340,6 +564,42 @@ export const ReferralManagementModule: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative">
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="p-3 bg-rose-500/20 rounded-2xl border border-rose-500/30">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Reset Referral Leaderboard?</h3>
+                <span className="text-xs text-rose-300">Action cannot be undone</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to reset all referral standings? This will set all user referral counts (`completedReferrals`) back to 0 across all student accounts.
+            </p>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReset}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-rose-600/30 cursor-pointer"
+              >
+                Yes, Reset All Standings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Referred Users Modal / Detail Drawer */}
       {selectedReferrer && (
@@ -375,9 +635,9 @@ export const ReferralManagementModule: React.FC = () => {
                 <p className="text-xs font-medium text-slate-200 mt-0.5 truncate">{selectedReferrer.email}</p>
               </div>
               <div>
-                <span className="text-[11px] font-semibold uppercase text-slate-500 block">Total Successful Referrals</span>
+                <span className="text-[11px] font-semibold uppercase text-slate-500 block">Completed Referrals</span>
                 <p className="text-sm font-extrabold text-emerald-400 mt-0.5">
-                  {selectedReferrer.successfulReferrals || 0} Users
+                  {selectedReferrer.completedReferrals ?? selectedReferrer.successfulReferrals ?? 0} Users
                 </p>
               </div>
             </div>
@@ -390,7 +650,10 @@ export const ReferralManagementModule: React.FC = () => {
 
               {referredUsersList.length === 0 ? (
                 <div className="p-8 text-center bg-slate-950/60 border border-slate-800 rounded-2xl text-xs text-slate-500 space-y-1">
-                  <p>No student accounts recorded with code <span className="font-mono text-indigo-400">{selectedReferrer.referralCode}</span> yet.</p>
+                  <p>
+                    No student accounts recorded with code{' '}
+                    <span className="font-mono text-indigo-400">{selectedReferrer.referralCode}</span> yet.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2">

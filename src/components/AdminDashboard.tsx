@@ -35,6 +35,7 @@ import { SecurityAccessModule } from './admin/SecurityAccessModule';
 import { TopicRequestManagementModule } from './admin/TopicRequestManagementModule';
 import { MenCoreManagementModule } from './admin/MenCoreManagementModule';
 import { ReferralManagementModule } from './admin/ReferralManagementModule';
+import { DepartmentManagementModule } from './admin/DepartmentManagementModule';
 import {
   Shield,
   BookOpen,
@@ -90,12 +91,13 @@ import {
   ShieldCheck,
   FileUp,
   ChevronDown,
-  Share2
+  Share2,
 } from 'lucide-react';
 
 export type AdminCategory =
   | null
   | 'students'
+  | 'signup_departments'
   | 'universities'
   | 'courses'
   | 'questions'
@@ -1219,6 +1221,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {activeCategory === 'topic_requests' && 'Community Learning & Topic Requests'}
                 {activeCategory === 'mencore_ai' && 'MenCore AI System & Joyce Tutor Studio'}
                 {activeCategory === 'referral_management' && 'Referral System & Influencer Tracking'}
+                {activeCategory === 'signup_departments' && 'Sign-Up Faculties & Departments Manager'}
               </h1>
             </div>
             <p className="text-xs text-slate-400 mt-1">
@@ -1263,6 +1266,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   ['topic_requests', '21. Community Learning & Topic Requests'],
                   ['mencore_ai', '22. MenCore AI System & Joyce Tutor Studio'],
                   ['referral_management', '23. Referral System & Influencer Tracking'],
+                  ['signup_departments', '24. Sign-Up Faculties & Departments Catalog'],
                 ] as [AdminCategory, string][]
               ).map(([catKey, label]) => {
                 const acc = checkCategoryAccess(catKey);
@@ -1639,6 +1643,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {[
                 { id: 'students', title: 'Student Management', desc: 'Search, profiles, CBT attempts, suspend, ban & export students.', icon: Users, color: 'text-indigo-400', border: 'hover:border-indigo-500' },
+                { id: 'signup_departments', title: 'Sign-Up Faculties & Departments', desc: 'Manage faculties and departments available during student sign up.', icon: GraduationCap, color: 'text-emerald-400', border: 'hover:border-emerald-500' },
                 { id: 'universities', title: 'University Management', desc: 'Add, edit, enable/disable partner institutions.', icon: Building2, color: 'text-sky-400', border: 'hover:border-sky-500' },
                 { id: 'courses', title: 'Course Management', desc: 'Manage university-based courses (FUL & FUAHSE).', icon: BookOpen, color: 'text-emerald-400', border: 'hover:border-emerald-500' },
                 { id: 'questions', title: 'Question Management', desc: 'Question bank, manual creation, search & bulk import.', icon: HelpCircle, color: 'text-amber-400', border: 'hover:border-amber-500' },
@@ -4001,6 +4006,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* --- Referral Management & Leaderboard Tracking --- */}
       {activeCategory === 'referral_management' && (
         <ReferralManagementModule />
+      )}
+
+      {/* --- Sign-Up Faculties & Departments Catalog Interface --- */}
+      {activeCategory === 'signup_departments' && (
+        <DepartmentManagementModule />
       )}
 
       {/* Role Permissions Matrix Modal */}

@@ -37,8 +37,13 @@ export function ensureReferralFields(user: UserProfile, existingUsers: UserProfi
     needsUpdate = true;
   }
 
-  const referrals = typeof user.successfulReferrals === 'number' ? user.successfulReferrals : 0;
-  if (typeof user.successfulReferrals !== 'number') {
+  const count = typeof user.completedReferrals === 'number'
+    ? user.completedReferrals
+    : typeof user.successfulReferrals === 'number'
+    ? user.successfulReferrals
+    : 0;
+
+  if (user.completedReferrals !== count || user.successfulReferrals !== count) {
     needsUpdate = true;
   }
 
@@ -46,7 +51,8 @@ export function ensureReferralFields(user: UserProfile, existingUsers: UserProfi
     return {
       ...user,
       referralCode: code,
-      successfulReferrals: referrals,
+      successfulReferrals: count,
+      completedReferrals: count,
     };
   }
 

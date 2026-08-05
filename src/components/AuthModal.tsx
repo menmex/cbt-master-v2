@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserProfile, UserRole, FUAHSE_DEPARTMENTS, FUL_DEPARTMENTS } from '../types';
+import { UserProfile, UserRole, FUAHSE_DEPARTMENTS, FUL_DEPARTMENTS, COMMON_UNIVERSITY_DEPARTMENTS, University, FacultyGroup } from '../types';
 import { StorageService, safeStringify } from '../services/storage';
 import { generateUniqueReferralCode } from '../utils/referrals';
 import { ApiClient } from '../services/apiClient';
@@ -36,6 +36,10 @@ import {
   EyeOff,
   Share2,
   Ticket,
+  Search,
+  ChevronDown,
+  MapPin,
+  Check,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -52,6 +56,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'register',
   onClose,
   onLoginSuccess,
+  universities: propUniversities,
 }) => {
   const [mode, setMode] = useState<'register' | 'login' | 'admin' | 'forgot'>(initialMode);
   const [role, setRole] = useState<UserRole>('student');
@@ -95,6 +100,91 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // University & Department Selection
   const [selectedUniversity, setSelectedUniversity] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
+  const [uniSearchQuery, setUniSearchQuery] = useState<string>('');
+  const [isUniDropdownOpen, setIsUniDropdownOpen] = useState<boolean>(false);
+  const uniDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Categorized Faculty Groups & Department Search State
+  const [facultyGroups, setFacultyGroups] = useState<FacultyGroup[]>([]);
+  const [deptSearchQuery, setDeptSearchQuery] = useState<string>('');
+  const [isDeptDropdownOpen, setIsDeptDropdownOpen] = useState<boolean>(false);
+  const deptDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setFacultyGroups(StorageService.getSignupFacultyGroups());
+  }, []);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uniDropdownRef.current && !uniDropdownRef.current.contains(event.target as Node)) {
+        setIsUniDropdownOpen(false);
+      }
+      if (deptDropdownRef.current && !deptDropdownRef.current.contains(event.target as Node)) {
+        setIsDeptDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const allUniversities = React.useMemo<University[]>(() => {
+    const fetched = propUniversities && propUniversities.length > 0
+      ? (propUniversities as University[])
+      : StorageService.getUniversities();
+    return [...fetched].sort((a, b) => a.name.localeCompare(b.name));
+  }, [propUniversities]);
+
+  const filteredUniversities = React.useMemo(() => {
+    if (!uniSearchQuery.trim()) return allUniversities;
+    const q = uniSearchQuery.toLowerCase().trim();
+    return allUniversities.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        (u.abbreviation && u.abbreviation.toLowerCase().includes(q)) ||
+        (u.location && u.location.toLowerCase().includes(q))
+    );
+  }, [allUniversities, uniSearchQuery]);
+
+  const selectedUniObj = React.useMemo(() => {
+    if (!selectedUniversity) return null;
+    return allUniversities.find(
+      (u) => u.id === selectedUniversity || u.name === selectedUniversity
+    ) || null;
+  }, [allUniversities, selectedUniversity]);
+
+  // Filtered Faculty Groups based on user search query
+  const filteredFacultyGroups = React.useMemo(() => {
+    const q = deptSearchQuery.toLowerCase().trim();
+    if (!q) return facultyGroups;
+
+    return facultyGroups
+      .map((fac) => {
+        const facNameMatches = fac.name.toLowerCase().includes(q);
+        const matchingDepts = fac.departments.filter((d) => d.toLowerCase().includes(q));
+
+        if (facNameMatches) return fac;
+        if (matchingDepts.length > 0) {
+          return {
+            ...fac,
+            departments: matchingDepts,
+          };
+        }
+        return null;
+      })
+      .filter((f): f is FacultyGroup => f !== null);
+  }, [facultyGroups, deptSearchQuery]);
+
+  // Faculty name of selected department
+  const selectedDeptFaculty = React.useMemo(() => {
+    if (!selectedDepartment) return null;
+    for (const fg of facultyGroups) {
+      if (fg.departments.some((d) => d.toLowerCase() === selectedDepartment.toLowerCase())) {
+        return fg.name;
+      }
+    }
+    return null;
+  }, [facultyGroups, selectedDepartment]);
 
   // Terms & Privacy Checkboxes
   const [agreeTerms, setAgreeTerms] = useState<boolean>(false);
@@ -215,21 +305,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     return msg || 'Authentication failed. Please check your information and try again.';
-  };
-
-  // Department options dependent on selected university
-  const departmentOptions =
-    selectedUniversity === 'FUAHSE'
-      ? FUAHSE_DEPARTMENTS
-      : selectedUniversity === 'FUL'
-      ? FUL_DEPARTMENTS
-      : [];
-
-  const handleUniversityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newUni = e.target.value;
-    setSelectedUniversity(newUni);
-    setSelectedDepartment('');
-    setRegTouched((prev) => ({ ...prev, selectedUniversity: true, selectedDepartment: true }));
   };
 
   // ==================== REAL-TIME REGISTRATION VALIDATION ====================
@@ -498,10 +573,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const newRefCode = generateUniqueReferralCode(existingRefCodes);
 
       const newUserId = firebaseUid || `usr-${Date.now()}`;
-      const uniName =
-        selectedUniversity === 'FUAHSE'
-          ? 'Federal University of Allied Health Sciences, Enugu (FUAHSE)'
-          : 'Federal University Lokoja, Kogi State (FUL)';
+      const uniName = selectedUniObj?.name || selectedUniversity || 'University of Lagos';
+      const uniId = selectedUniObj?.id || (selectedUniversity ? `uni-${selectedUniversity.toLowerCase().replace(/\s+/g, '-')}` : 'uni-1');
 
       const newUser: UserProfile = {
         id: newUserId,
@@ -513,7 +586,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         password: password,
         role: 'student',
         authProvider: 'Email',
-        universityId: selectedUniversity === 'FUAHSE' ? 'uni-fuahse' : 'uni-ful',
+        universityId: uniId,
         universityName: uniName,
         departmentId: `dept-${selectedDepartment.toLowerCase().replace(/\s+/g, '-')}`,
         departmentName: selectedDepartment,
@@ -875,12 +948,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         StorageService.saveUser(matchedUser);
         onLoginSuccess(matchedUser, "Welcome back!");
       } else {
-        const defaultUni = selectedUniversity || 'FUL';
-        const defaultDept = selectedDepartment || (defaultUni === 'FUAHSE' ? 'Medicine and Surgery' : 'Computer Science');
-        const uniName =
-          defaultUni === 'FUAHSE'
-            ? 'Federal University of Allied Health Sciences, Enugu (FUAHSE)'
-            : 'Federal University Lokoja, Kogi State (FUL)';
+        const defaultUniObj = selectedUniObj || allUniversities[0];
+        const defaultUniId = defaultUniObj?.id || 'uni-1';
+        const defaultDept = selectedDepartment || 'Computer Science';
+        const uniName = defaultUniObj?.name || 'University of Lagos';
 
         const newGoogleUser: UserProfile = {
           id: googleUid,
@@ -891,7 +962,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           googleUserId: googleUid,
           authProvider: 'Google',
           role: 'student',
-          universityId: defaultUni === 'FUAHSE' ? 'uni-fuahse' : 'uni-ful',
+          universityId: defaultUniId,
           universityName: uniName,
           departmentId: `dept-${defaultDept.toLowerCase().replace(/\s+/g, '-')}`,
           departmentName: defaultDept,
@@ -1830,29 +1901,149 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </div>
 
-              {/* Select University */}
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Select University <span className="text-rose-400">*</span>
+              {/* Select University with Searchable Selector */}
+              <div className="relative" ref={uniDropdownRef}>
+                <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                  <span>
+                    Choose Your University <span className="text-rose-400">*</span>
+                  </span>
+                  <span className="text-[10px] text-cyan-400 font-semibold bg-cyan-950/60 px-2 py-0.5 rounded-full border border-cyan-500/30">
+                    {allUniversities.length} Universities (A-Z)
+                  </span>
                 </label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                  <select
-                    ref={universityRef}
-                    value={selectedUniversity}
-                    onChange={handleUniversityChange}
-                    onBlur={() => touchRegField('selectedUniversity')}
-                    className={`w-full pl-9 pr-8 py-2.5 bg-slate-950 border rounded-xl text-xs text-slate-200 focus:outline-none appearance-none cursor-pointer transition-all ${
-                      regTouched.selectedUniversity && regErrors.selectedUniversity
-                        ? 'border-rose-500 bg-rose-500/5 focus:border-rose-500'
-                        : 'border-slate-800 focus:border-indigo-500'
-                    }`}
-                  >
-                    <option value="">-- Select University --</option>
-                    <option value="FUAHSE">Federal University of Allied Health Sciences, Enugu (FUAHSE)</option>
-                    <option value="FUL">Federal University Lokoja, Kogi State (FUL)</option>
-                  </select>
+
+                {/* University Picker Display Button */}
+                <div
+                  onClick={() => setIsUniDropdownOpen((prev) => !prev)}
+                  className={`w-full min-h-[42px] px-3 py-2 bg-slate-950 border rounded-xl text-xs text-slate-200 cursor-pointer transition-all flex items-center justify-between ${
+                    regTouched.selectedUniversity && regErrors.selectedUniversity
+                      ? 'border-rose-500 bg-rose-500/5 focus:border-rose-500'
+                      : isUniDropdownOpen
+                      ? 'border-indigo-500 ring-2 ring-indigo-500/20'
+                      : 'border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 overflow-hidden pr-2">
+                    <Building2 className={`w-4 h-4 shrink-0 ${selectedUniObj ? 'text-cyan-400' : 'text-slate-500'}`} />
+                    {selectedUniObj ? (
+                      <div className="flex items-center gap-2 overflow-hidden text-left">
+                        <span className="font-semibold text-white truncate text-xs">{selectedUniObj.name}</span>
+                        {selectedUniObj.abbreviation && (
+                          <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded shrink-0">
+                            {selectedUniObj.abbreviation}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 text-xs">Search or choose your university...</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {selectedUniversity && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUniversity('');
+                          setSelectedDepartment('');
+                          setUniSearchQuery('');
+                        }}
+                        className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors"
+                        title="Clear university selection"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isUniDropdownOpen ? 'rotate-180' : ''}`} />
+                  </div>
                 </div>
+
+                {/* University Search Popover & Dropdown */}
+                {isUniDropdownOpen && (
+                  <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+                    {/* Search Space Header */}
+                    <div className="p-2.5 bg-slate-950/90 border-b border-slate-800 sticky top-0 z-10">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-cyan-400 absolute left-3 top-2.5 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={uniSearchQuery}
+                          onChange={(e) => setUniSearchQuery(e.target.value)}
+                          placeholder="Search university by name, code (UNILAG, ABU, OAU) or state..."
+                          className="w-full pl-9 pr-8 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                          autoFocus
+                        />
+                        {uniSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setUniSearchQuery('')}
+                            className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5 px-1 font-medium">
+                        <span>{filteredUniversities.length} universities available</span>
+                        <span>Sorted A to Z</span>
+                      </div>
+                    </div>
+
+                    {/* Scrollable Alphabetical University List */}
+                    <div className="max-h-60 overflow-y-auto divide-y divide-slate-800/40 p-1 custom-scrollbar">
+                      {filteredUniversities.length === 0 ? (
+                        <div className="py-8 text-center px-4">
+                          <Building2 className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                          <p className="text-xs text-slate-300 font-medium">No university found matching "{uniSearchQuery}"</p>
+                          <p className="text-[11px] text-slate-500 mt-1">Try searching by abbreviation (e.g. UNILAG, ABU, FUTA) or location state.</p>
+                        </div>
+                      ) : (
+                        filteredUniversities.map((uni) => {
+                          const isSelected = selectedUniversity === uni.id || selectedUniversity === uni.name;
+                          return (
+                            <button
+                              key={uni.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedUniversity(uni.id);
+                                setSelectedDepartment('');
+                                setIsUniDropdownOpen(false);
+                                setRegTouched((prev) => ({ ...prev, selectedUniversity: true }));
+                                if (topBannerError) setTopBannerError(null);
+                              }}
+                              className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-center justify-between group ${
+                                isSelected
+                                  ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-200'
+                                  : 'hover:bg-slate-800/80 text-slate-200'
+                              }`}
+                            >
+                              <div className="flex flex-col gap-0.5 pr-2 overflow-hidden">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-xs group-hover:text-white transition-colors truncate">
+                                    {uni.name}
+                                  </span>
+                                  {uni.abbreviation && (
+                                    <span className="text-[9px] font-bold bg-slate-800 text-cyan-300 border border-slate-700 px-1.5 py-0.2 rounded shrink-0">
+                                      {uni.abbreviation}
+                                    </span>
+                                  )}
+                                </div>
+                                {uni.location && (
+                                  <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                    <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
+                                    <span className="truncate">{uni.location}</span>
+                                  </div>
+                                )}
+                              </div>
+                              {isSelected && <Check className="w-4 h-4 text-cyan-400 shrink-0 ml-2" />}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {regTouched.selectedUniversity && regErrors.selectedUniversity && (
                   <p className="text-[11px] text-rose-400 mt-1 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
@@ -1861,45 +2052,127 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </div>
 
-              {/* Department Selection */}
+              {/* Department Selection (Searchable & Categorized by Faculty) */}
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Department / Course <span className="text-rose-400">*</span>
+                <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                  <span>
+                    Department / Course <span className="text-rose-400">*</span>
+                  </span>
+                  {selectedDeptFaculty && (
+                    <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20 truncate max-w-[200px]">
+                      {selectedDeptFaculty}
+                    </span>
+                  )}
                 </label>
-                <div className="relative">
-                  <BookOpen className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                  <select
-                    ref={departmentRef}
-                    value={selectedDepartment}
-                    onChange={(e) => {
-                      setSelectedDepartment(e.target.value);
-                      touchRegField('selectedDepartment');
-                      if (topBannerError) setTopBannerError(null);
-                    }}
-                    onBlur={() => touchRegField('selectedDepartment')}
+
+                <div className="relative" ref={deptDropdownRef}>
+                  <button
+                    type="button"
                     disabled={!selectedUniversity}
-                    className={`w-full pl-9 pr-8 py-2.5 border rounded-xl text-xs appearance-none transition-all ${
+                    onClick={() => {
+                      if (selectedUniversity) {
+                        setIsDeptDropdownOpen((prev) => !prev);
+                        touchRegField('selectedDepartment');
+                      }
+                    }}
+                    className={`w-full pl-9 pr-8 py-2.5 border rounded-xl text-xs text-left flex items-center justify-between transition-all ${
                       !selectedUniversity
                         ? 'bg-slate-950/40 border-slate-800/60 text-slate-600 cursor-not-allowed'
                         : regTouched.selectedDepartment && regErrors.selectedDepartment
-                        ? 'bg-slate-950 border-rose-500 text-slate-200 focus:outline-none focus:border-rose-500'
+                        ? 'bg-slate-950 border-rose-500 text-slate-200 focus:outline-none focus:border-rose-500 cursor-pointer'
                         : 'bg-slate-950 border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer'
                     }`}
                   >
-                    {!selectedUniversity ? (
-                      <option value="">Select a University first</option>
-                    ) : (
-                      <>
-                        <option value="">-- Select Course / Department --</option>
-                        {departmentOptions.map((deptName) => (
-                          <option key={deptName} value={deptName}>
-                            {deptName}
-                          </option>
-                        ))}
-                      </>
-                    )}
-                  </select>
+                    <BookOpen className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                    <span className={`truncate ${selectedDepartment ? 'text-slate-100 font-semibold' : 'text-slate-500'}`}>
+                      {!selectedUniversity
+                        ? 'Select a University first'
+                        : selectedDepartment || '-- Search or Select Course / Department --'}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-500 transition-transform ${
+                        isDeptDropdownOpen ? 'rotate-180 text-indigo-400' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {/* Searchable Categorized Dropdown Panel */}
+                  {isDeptDropdownOpen && selectedUniversity && (
+                    <div className="absolute z-50 left-0 right-0 mt-1.5 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden max-h-80 flex flex-col animate-in fade-in slide-in-from-top-2">
+                      {/* Search Header Input */}
+                      <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center gap-2 sticky top-0 z-10">
+                        <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                        <input
+                          ref={departmentRef as any}
+                          type="text"
+                          value={deptSearchQuery}
+                          onChange={(e) => setDeptSearchQuery(e.target.value)}
+                          placeholder="Search course or department (e.g. Computer Science, Law, Nursing)..."
+                          className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+                          autoFocus
+                        />
+                        {deptSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setDeptSearchQuery('')}
+                            className="text-slate-500 hover:text-slate-300"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* List of Categorized Faculties & Departments */}
+                      <div className="overflow-y-auto flex-1 p-2 space-y-3 custom-scrollbar">
+                        {filteredFacultyGroups.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-slate-500">
+                            No department matching "{deptSearchQuery}" found.
+                          </div>
+                        ) : (
+                          filteredFacultyGroups.map((facGroup) => (
+                            <div key={facGroup.id} className="space-y-1">
+                              {/* Faculty Header Badge */}
+                              <div className="text-[11px] font-bold text-indigo-400 px-2 py-1 bg-indigo-500/10 rounded-lg border border-indigo-500/20 flex items-center justify-between">
+                                <span className="truncate">{facGroup.name}</span>
+                                <span className="text-[9px] text-slate-400 font-normal shrink-0 ml-2">
+                                  {facGroup.departments.length} depts
+                                </span>
+                              </div>
+
+                              {/* Departments under this faculty */}
+                              <div className="grid grid-cols-1 gap-0.5 pl-1">
+                                {facGroup.departments.map((deptName) => {
+                                  const isSelected = selectedDepartment === deptName;
+                                  return (
+                                    <button
+                                      key={deptName}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedDepartment(deptName);
+                                        touchRegField('selectedDepartment');
+                                        setIsDeptDropdownOpen(false);
+                                        if (topBannerError) setTopBannerError(null);
+                                      }}
+                                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                                        isSelected
+                                          ? 'bg-indigo-600/30 text-indigo-200 font-bold border border-indigo-500/40'
+                                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                                      }`}
+                                    >
+                                      <span className="truncate">{deptName}</span>
+                                      {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0 ml-2" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 {!selectedUniversity ? (
                   <p className="text-[11px] text-slate-500 mt-1">Select a university to unlock course selection.</p>
                 ) : regTouched.selectedDepartment && regErrors.selectedDepartment ? (

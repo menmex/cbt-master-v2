@@ -22,13 +22,15 @@ import {
   ExternalLink,
   Quote,
 } from 'lucide-react';
-import { SubscriptionPlan } from '../types';
+import { SubscriptionPlan, UserProfile } from '../types';
+import { ReferralLeaderboard } from './ReferralLeaderboard';
 
 interface LandingPageProps {
   onStartPractice: () => void;
   onOpenAuth: (mode?: 'register' | 'login' | 'admin' | 'forgot') => void;
   onOpenSubscribe: () => void;
   plans: SubscriptionPlan[];
+  currentUser?: UserProfile | null;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -36,6 +38,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenAuth,
   onOpenSubscribe,
   plans,
+  currentUser,
 }) => {
   const [activeFaq, setActiveFaq] = useState<number | null>(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -555,6 +558,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           </div>
 
+        </div>
+      </section>
+
+      {/* Real-Time Referral Leaderboard Section */}
+      <section className="py-16 bg-slate-950 relative" id="homepage-referral-leaderboard-section">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <ReferralLeaderboard
+            currentUser={currentUser}
+            title="Referral Leaderboard"
+            idPrefix="homepage-referral-lb"
+          />
         </div>
       </section>
 

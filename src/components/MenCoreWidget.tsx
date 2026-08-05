@@ -281,7 +281,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
           <div className="px-4 py-3.5 bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 text-white flex items-center justify-between border-b border-indigo-500/30">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <MenCoreAvatar size="md" className="border-white/30" />
+                <MenCoreAvatar size="md" className="border-white/30" src={settings.avatarUrl} />
                 <span
                   className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${
                     settings.onlineStatus === 'online'
@@ -429,7 +429,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
                 {/* Typing Indicator */}
                 {isTyping && (
                   <div className="flex items-center gap-2 text-xs text-slate-400 animate-pulse px-2">
-                    <MenCoreAvatar size="sm" />
+                    <MenCoreAvatar size="sm" src={settings.avatarUrl} />
                     <span className="font-medium">{settings.name || 'MenCore'} is typing...</span>
                   </div>
                 )}
@@ -529,7 +529,7 @@ export const MenCoreWidget: React.FC<MenCoreWidgetProps> = ({
           }`}
           title="MenCore AI Assistant • Powered by Menmex (Drag to move)"
         >
-          <MenCoreAvatar size="lg" className="w-12 h-12 shadow-lg" />
+          <MenCoreAvatar size="lg" className="w-12 h-12 shadow-lg" src={settings.avatarUrl} />
 
           {/* Unread Announcements or Online Badge */}
           {totalBadge > 0 && !isOpen ? (

@@ -25,11 +25,14 @@ import {
   SystemSettingsPayload,
   TopicRequest,
   TopicCollectionConfig,
+  ReferralLeaderboardConfig,
   TutorialVideo,
   CommunityDiscussionPost,
   CommunityReply,
   LearningResourceItem,
   CommunityAnnouncement,
+  FacultyGroup,
+  DEFAULT_FACULTY_DEPARTMENTS,
   SEED_UNIVERSITIES,
   SEED_FACULTIES,
   SEED_DEPARTMENTS,
@@ -253,15 +256,23 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         cName === 'Ka' ||
         cName === 'UserImpl' ||
         cName === 'AuthImpl' ||
+        cName === 'Firestore' ||
+        cName === 'DocumentReference' ||
+        cName === 'QuerySnapshot' ||
+        cName.includes('Firebase') ||
+        cName.includes('Auth') ||
+        cName.includes('Firestore') ||
         (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String');
       if (!isCircularSdkObject) {
         try {
-          if ('src' in val || ('i' in val && typeof val.i === 'object')) isCircularSdkObject = true;
+          if ('_delegate' in val || '_firestore' in val || '_auth' in val || '_query' in val || '_key' in val || '_path' in val || '_model' in val || '_app' in val || 'stsTokenManager' in val || 'proactiveRefresh' in val || 'reloadUserInfo' in val) {
+            isCircularSdkObject = true;
+          }
         } catch {}
       }
       if (!isCircularSdkObject) {
         try {
-          if ('_delegate' in val || '_firestore' in val || '_auth' in val || '_query' in val || '_key' in val || '_path' in val || '_model' in val || '_app' in val) {
+          if (('i' in val && typeof val.i === 'object' && val.i !== null && 'src' in val.i) || ('src' in val && 'i' in val && typeof val.src === 'object')) {
             isCircularSdkObject = true;
           }
         } catch {}
@@ -540,6 +551,8 @@ const STORAGE_KEYS = {
   COMMUNITY_REPLIES: 'cbt_community_replies',
   LEARNING_RESOURCES: 'cbt_learning_resources',
   COMMUNITY_ANNOUNCEMENTS: 'cbt_community_announcements',
+  REFERRAL_LEADERBOARD_CONFIG: 'cbt_referral_leaderboard_config',
+  SIGNUP_FACULTY_GROUPS: 'cbt_signup_faculty_groups',
 };
 
 const DEFAULT_USER: UserProfile = {
@@ -956,6 +969,25 @@ export class StorageService {
     } catch (err) {
       console.warn('Failed to attach topic_collection_status listener:', err);
     }
+
+    // 16. Real-time Referral Leaderboard Config Listener
+    try {
+      const unsubReferralLeaderboardConfig = onSnapshot(
+        doc(db, 'system_configs', 'referral_leaderboard'),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const cfg = docSnap.data() as ReferralLeaderboardConfig;
+            this.setItem(STORAGE_KEYS.REFERRAL_LEADERBOARD_CONFIG, cfg);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'system_configs/referral_leaderboard');
+        }
+      );
+      this.unsubscribers.push(unsubReferralLeaderboardConfig);
+    } catch (err) {
+      console.warn('Failed to attach referral_leaderboard listener:', err);
+    }
   }
 
   private static getItem<T>(key: string, defaultValue: T): T {
@@ -1153,7 +1185,17 @@ export class StorageService {
 
   // Universities, Faculties, Depts, Courses, Topics
   static getUniversities(): University[] {
-    return this.getItem<University[]>(STORAGE_KEYS.UNIVERSITIES, SEED_UNIVERSITIES);
+    const list = this.getItem<University[]>(STORAGE_KEYS.UNIVERSITIES, SEED_UNIVERSITIES);
+    // Combine with SEED_UNIVERSITIES to ensure any new universities are included
+    const existingIds = new Set(list.map((u) => u.id));
+    const merged = [...list];
+    SEED_UNIVERSITIES.forEach((seedUni) => {
+      if (!existingIds.has(seedUni.id)) {
+        merged.push(seedUni);
+      }
+    });
+    // Sort alphabetically by university name
+    return merged.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   static saveUniversities(data: University[]): void {
@@ -3104,6 +3146,70 @@ export class StorageService {
       },
     ];
     return this.getItem<CommunityAnnouncement[]>(STORAGE_KEYS.COMMUNITY_ANNOUNCEMENTS, defaultAnnouncements);
+  }
+
+  // Referral Leaderboard Config & Reset Methods
+  static getReferralLeaderboardConfig(): ReferralLeaderboardConfig {
+    const defaultConfig: ReferralLeaderboardConfig = {
+      enabled: true,
+      showOnHomepage: true,
+      showOnDashboard: true,
+      updatedAt: new Date().toISOString(),
+    };
+    return this.getItem<ReferralLeaderboardConfig>(STORAGE_KEYS.REFERRAL_LEADERBOARD_CONFIG, defaultConfig);
+  }
+
+  static saveReferralLeaderboardConfig(config: ReferralLeaderboardConfig): void {
+    const updated = { ...config, updatedAt: new Date().toISOString() };
+    this.setItem(STORAGE_KEYS.REFERRAL_LEADERBOARD_CONFIG, updated);
+    setDoc(doc(db, 'system_configs', 'referral_leaderboard'), safeClone(updated), { merge: true }).catch((err) => {
+      handleFirestoreError(err, OperationType.WRITE, 'system_configs/referral_leaderboard');
+    });
+  }
+
+  static resetReferralRankings(): void {
+    const allUsers = this.getUsers();
+    const resetUsers = allUsers.map((u) => ({
+      ...u,
+      successfulReferrals: 0,
+      completedReferrals: 0,
+    }));
+
+    this.setItem(STORAGE_KEYS.USERS, resetUsers);
+
+    // Sync to Firestore for each user
+    resetUsers.forEach((u) => {
+      setDoc(doc(db, 'users', u.id), { successfulReferrals: 0, completedReferrals: 0 }, { merge: true }).catch((err) => {
+        handleFirestoreError(err, OperationType.WRITE, `users/${u.id}`);
+      });
+    });
+
+    // Also reset current logged-in user if saved locally
+    const currentUser = this.getItem<UserProfile | null>(STORAGE_KEYS.USER, null);
+    if (currentUser) {
+      this.setItem(STORAGE_KEYS.USER, {
+        ...currentUser,
+        successfulReferrals: 0,
+        completedReferrals: 0,
+      });
+    }
+  }
+
+  // Sign Up Faculties & Departments Management
+  static getSignupFacultyGroups(): FacultyGroup[] {
+    return this.getItem<FacultyGroup[]>(STORAGE_KEYS.SIGNUP_FACULTY_GROUPS, DEFAULT_FACULTY_DEPARTMENTS);
+  }
+
+  static saveSignupFacultyGroups(groups: FacultyGroup[]): void {
+    this.setItem(STORAGE_KEYS.SIGNUP_FACULTY_GROUPS, groups);
+    setDoc(doc(db, 'system_configs', 'signup_faculties'), { groups: safeClone(groups) }, { merge: true }).catch((err) => {
+      handleFirestoreError(err, OperationType.WRITE, 'system_configs/signup_faculties');
+    });
+  }
+
+  static resetSignupFacultyGroups(): FacultyGroup[] {
+    this.saveSignupFacultyGroups(DEFAULT_FACULTY_DEPARTMENTS);
+    return DEFAULT_FACULTY_DEPARTMENTS;
   }
 }
 

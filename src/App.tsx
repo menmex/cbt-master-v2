@@ -356,8 +356,9 @@ export default function App() {
       {/* Main View Router */}
       <main className="flex-1 py-6">
         
-        {activeTab === 'landing' && !currentUser && (
+        {activeTab === 'landing' && (
           <LandingPage
+            currentUser={currentUser}
             onStartPractice={() => {
               if (currentUser) {
                 setActiveTab('practice');
