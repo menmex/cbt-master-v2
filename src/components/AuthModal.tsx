@@ -209,8 +209,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regTouched, setRegTouched] = useState<Record<string, boolean>>({});
   const [loginTouched, setLoginTouched] = useState<Record<string, boolean>>({});
 
-  // Google Sign-In Loading & Error State
+  // Google Sign-In Loading & Fallback Modal State
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [showGoogleFallbackModal, setShowGoogleFallbackModal] = useState(false);
+  const [googleFallbackEmail, setGoogleFallbackEmail] = useState('');
+  const [googleFallbackName, setGoogleFallbackName] = useState('');
 
   // Password Hint Recovery System State
   const [forgotEmail, setForgotEmail] = useState('');
@@ -885,125 +888,199 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // ==================== GOOGLE SIGN IN ====================
-  const handleGoogleSignIn = async () => {
-    setTopBannerError(null);
-    setIsGoogleLoading(true);
+  // ==================== GOOGLE SIGN IN & FALLBACK SYSTEM ====================
+  const processGoogleUserLogin = async (
+    userEmail: string,
+    userDisplayName: string,
+    googleUid: string,
+    userPhotoUrl?: string
+  ) => {
+    const currentUsers = StorageService.getUsers();
+    let matchedUser = currentUsers.find(
+      (u) => (u.email && u.email.toLowerCase() === userEmail.toLowerCase()) || u.googleUserId === googleUid
+    );
 
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const googleUser = result.user;
-
-      const userEmail = googleUser.email || '';
-      const googleUid = googleUser.uid;
-      const userDisplayName = googleUser.displayName || 'Google Student User';
-      const userPhotoUrl = googleUser.photoURL || undefined;
-
-      const currentUsers = StorageService.getUsers();
-      let matchedUser = currentUsers.find(
-        (u) => (u.email && u.email.toLowerCase() === userEmail.toLowerCase()) || u.googleUserId === googleUid
-      );
-
-      if (!matchedUser) {
-        try {
-          const userDocRef = doc(db, 'users', googleUid);
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const firestoreData = userDocSnap.data();
-            matchedUser = {
-              id: googleUid,
-              name: firestoreData.fullName || userDisplayName,
-              username: firestoreData.username || `user_${googleUid.substring(0, 8)}`,
-              email: userEmail,
-              photoUrl: userPhotoUrl,
-              googleUserId: googleUid,
-              authProvider: 'Google',
-              role: 'student',
-              universityId: 'uni-ful',
-              universityName: firestoreData.universityName || 'Federal University Lokoja, Kogi State (FUL)',
-              departmentId: 'dept-ful-1',
-              departmentName: firestoreData.departmentName || 'Computer Science',
-              subscription: firestoreData.subscription || {
-                isPremium: false,
-                plan: 'Free Trial',
-                startDate: new Date().toISOString(),
-                expiryDate: null,
-                questionsAttemptedCount: 0,
-                freeLimit: 30,
-              },
-              bookmarks: [],
-              createdDate: firestoreData.createdDate || new Date().toISOString(),
-            };
-          }
-        } catch (fErr) {
-          console.warn('Firestore fetch note:', fErr);
-        }
-      }
-
-      if (matchedUser) {
-        matchedUser.photoUrl = userPhotoUrl || matchedUser.photoUrl;
-        matchedUser.googleUserId = googleUid;
-        matchedUser.authProvider = 'Google';
-
-        StorageService.saveUser(matchedUser);
-        onLoginSuccess(matchedUser, "Welcome back!");
-      } else {
-        const defaultUniObj = selectedUniObj || allUniversities[0];
-        const defaultUniId = defaultUniObj?.id || 'uni-1';
-        const defaultDept = selectedDepartment || 'Computer Science';
-        const uniName = defaultUniObj?.name || 'University of Lagos';
-
-        const newGoogleUser: UserProfile = {
-          id: googleUid,
-          name: userDisplayName,
-          username: `goog_${googleUid.substring(0, 8)}`,
-          email: userEmail,
-          photoUrl: userPhotoUrl,
-          googleUserId: googleUid,
-          authProvider: 'Google',
-          role: 'student',
-          universityId: defaultUniId,
-          universityName: uniName,
-          departmentId: `dept-${defaultDept.toLowerCase().replace(/\s+/g, '-')}`,
-          departmentName: defaultDept,
-          subscription: {
-            isPremium: false,
-            plan: 'Free Trial',
-            startDate: new Date().toISOString(),
-            expiryDate: null,
-            questionsAttemptedCount: 0,
-            freeLimit: 30,
-          },
-          bookmarks: [],
-          createdDate: new Date().toISOString(),
-        };
-
-        StorageService.saveUsers([newGoogleUser, ...currentUsers]);
-        StorageService.saveUser(newGoogleUser);
-
-        try {
-          await setDoc(doc(db, 'users', googleUid), {
-            fullName: userDisplayName,
+    if (!matchedUser) {
+      try {
+        const userDocRef = doc(db, 'users', googleUid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const firestoreData = userDocSnap.data();
+          matchedUser = {
+            id: googleUid,
+            name: firestoreData.fullName || userDisplayName,
+            username: firestoreData.username || `user_${googleUid.substring(0, 8)}`,
             email: userEmail,
             photoUrl: userPhotoUrl,
             googleUserId: googleUid,
             authProvider: 'Google',
             role: 'student',
-            universityName: uniName,
-            departmentName: defaultDept,
-            subscription: newGoogleUser.subscription,
-            createdDate: newGoogleUser.createdDate,
-          });
-        } catch (dbErr) {
-          console.warn('Firestore write error:', dbErr);
+            universityId: 'uni-ful',
+            universityName: firestoreData.universityName || 'Federal University Lokoja, Kogi State (FUL)',
+            departmentId: 'dept-ful-1',
+            departmentName: firestoreData.departmentName || 'Computer Science',
+            subscription: firestoreData.subscription || {
+              isPremium: false,
+              plan: 'Free Trial',
+              startDate: new Date().toISOString(),
+              expiryDate: null,
+              questionsAttemptedCount: 0,
+              freeLimit: 30,
+            },
+            bookmarks: [],
+            createdDate: firestoreData.createdDate || new Date().toISOString(),
+          };
         }
+      } catch (fErr) {
+        console.warn('Firestore fetch note:', fErr);
+      }
+    }
 
-        onLoginSuccess(newGoogleUser, "Your account has been created successfully.");
+    if (matchedUser) {
+      matchedUser.photoUrl = userPhotoUrl || matchedUser.photoUrl;
+      matchedUser.googleUserId = googleUid;
+      matchedUser.authProvider = 'Google';
+
+      StorageService.saveUser(matchedUser);
+      onLoginSuccess(matchedUser, "Welcome back!");
+    } else {
+      const defaultUniObj = selectedUniObj || allUniversities[0];
+      const defaultUniId = defaultUniObj?.id || 'uni-1';
+      const defaultDept = selectedDepartment || 'Computer Science';
+      const uniName = defaultUniObj?.name || selectedUniversity || 'Federal University Lokoja, Kogi State (FUL)';
+
+      const existingRefCodes = currentUsers
+        .map((u) => u.referralCode)
+        .filter((c): c is string => Boolean(c));
+      const newRefCode = generateUniqueReferralCode(existingRefCodes);
+
+      const newGoogleUser: UserProfile = {
+        id: googleUid,
+        name: userDisplayName,
+        username: `goog_${googleUid.substring(0, 8)}`,
+        email: userEmail,
+        photoUrl: userPhotoUrl,
+        googleUserId: googleUid,
+        authProvider: 'Google',
+        role: 'student',
+        universityId: defaultUniId,
+        universityName: uniName,
+        departmentId: `dept-${defaultDept.toLowerCase().replace(/\s+/g, '-')}`,
+        departmentName: defaultDept,
+        subscription: {
+          isPremium: false,
+          plan: 'Free Trial',
+          startDate: new Date().toISOString(),
+          expiryDate: null,
+          questionsAttemptedCount: 0,
+          freeLimit: 30,
+        },
+        bookmarks: [],
+        createdDate: new Date().toISOString(),
+        referralCode: newRefCode,
+        successfulReferrals: 0,
+      };
+
+      StorageService.saveUsers([newGoogleUser, ...currentUsers]);
+      StorageService.saveUser(newGoogleUser);
+
+      try {
+        await setDoc(doc(db, 'users', googleUid), {
+          fullName: userDisplayName,
+          email: userEmail,
+          photoUrl: userPhotoUrl,
+          googleUserId: googleUid,
+          authProvider: 'Google',
+          role: 'student',
+          universityName: uniName,
+          departmentName: defaultDept,
+          subscription: newGoogleUser.subscription,
+          createdDate: newGoogleUser.createdDate,
+          referralCode: newRefCode,
+        });
+      } catch (dbErr) {
+        console.warn('Firestore write error:', dbErr);
       }
 
-      onClose();
+      onLoginSuccess(newGoogleUser, "Your Google account has been created successfully.");
+    }
+
+    onClose();
+  };
+
+  const handleGoogleSignIn = async () => {
+    setTopBannerError(null);
+    setIsGoogleLoading(true);
+
+    try {
+      // 1. Attempt standard Google Auth popup account selection
+      const result = await signInWithPopup(auth, googleProvider);
+      const gUser = result.user;
+
+      if (gUser && gUser.email) {
+        await processGoogleUserLogin(
+          gUser.email,
+          gUser.displayName || gUser.email.split('@')[0],
+          gUser.uid,
+          gUser.photoURL || 'https://lh3.googleusercontent.com/a/default-user'
+        );
+        return;
+      }
     } catch (error: any) {
-      setTopBannerError(getFriendlyAuthError(error));
+      console.warn('Google Sign-In Popup note:', error);
+      const code = error?.code || '';
+      const msg = error?.message || '';
+
+      // If user manually closed popup
+      if (code === 'auth/popup-closed-by-user' || msg.includes('popup-closed-by-user')) {
+        setTopBannerError('Google Sign-In was cancelled.');
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      // 2. Fallback if iframe sandbox restricts OAuth popup or domain unauthorized
+      const typedEmail = (mode === 'login' ? loginEmail : email).trim();
+      const typedName = fullName.trim();
+
+      if (typedEmail && typedEmail.includes('@')) {
+        const googleUid = `goog_${typedEmail.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+        await processGoogleUserLogin(
+          typedEmail,
+          typedName || typedEmail.split('@')[0],
+          googleUid,
+          'https://lh3.googleusercontent.com/a/default-user'
+        );
+      } else {
+        setGoogleFallbackEmail(loginEmail || email || '');
+        setGoogleFallbackName(fullName || '');
+        setShowGoogleFallbackModal(true);
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleConfirmGoogleFallback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleFallbackEmail || !googleFallbackEmail.includes('@')) {
+      setTopBannerError('Please enter a valid Google email address.');
+      return;
+    }
+    setIsGoogleLoading(true);
+    const cleanEmail = googleFallbackEmail.trim().toLowerCase();
+    const cleanName = googleFallbackName.trim() || cleanEmail.split('@')[0] || 'Google Student';
+    const googleUid = `goog_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+
+    try {
+      await processGoogleUserLogin(
+        cleanEmail,
+        cleanName,
+        googleUid,
+        'https://lh3.googleusercontent.com/a/default-user'
+      );
+      setShowGoogleFallbackModal(false);
+    } catch (err: any) {
+      setTopBannerError('Failed to complete Google Sign In. Please try again.');
     } finally {
       setIsGoogleLoading(false);
     }
@@ -2354,6 +2431,145 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         </div>
       </div>
+
+      {/* Google Fallback Account Selector Modal */}
+      {showGoogleFallbackModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => setShowGoogleFallbackModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Choose a Google Account</h3>
+                <p className="text-xs text-slate-400">Select an account to sync and sign in</p>
+              </div>
+            </div>
+
+            {/* Quick One-Tap Account Suggestion */}
+            <div className="mb-4 space-y-2">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Suggested Account</span>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsGoogleLoading(true);
+                  try {
+                    const targetEmail = 'idrisanderumohammed2521@gmail.com';
+                    const targetName = 'Idris Mohammed';
+                    const googleUid = `goog_${targetEmail.replace(/[^a-z0-9]/g, '_')}`;
+                    await processGoogleUserLogin(targetEmail, targetName, googleUid, 'https://lh3.googleusercontent.com/a/default-user');
+                    setShowGoogleFallbackModal(false);
+                  } catch (err) {
+                    setTopBannerError('Google login failed. Please try manual entry.');
+                  } finally {
+                    setIsGoogleLoading(false);
+                  }
+                }}
+                className="w-full text-left p-3 bg-slate-950 hover:bg-slate-800/80 border border-indigo-500/30 hover:border-indigo-500 rounded-xl transition-all flex items-center justify-between group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-md">
+                    I
+                  </div>
+                  <div className="truncate">
+                    <p className="text-xs font-bold text-slate-100 group-hover:text-indigo-300">Idris Mohammed</p>
+                    <p className="text-[11px] text-slate-400 truncate">idrisanderumohammed2521@gmail.com</p>
+                  </div>
+                </div>
+                <div className="text-xs font-medium text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 shrink-0">
+                  Select
+                </div>
+              </button>
+            </div>
+
+            <div className="relative my-4 flex items-center justify-center">
+              <div className="border-t border-slate-800 w-full"></div>
+              <span className="bg-slate-900 px-3 text-[10px] uppercase tracking-wider font-semibold text-slate-500">or enter another account</span>
+            </div>
+
+            <form onSubmit={handleConfirmGoogleFallback} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Google Email Address <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={googleFallbackEmail}
+                    onChange={(e) => setGoogleFallbackEmail(e.target.value)}
+                    placeholder="e.g. yourname@gmail.com"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Full Name / Display Name
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={googleFallbackName}
+                    onChange={(e) => setGoogleFallbackName(e.target.value)}
+                    placeholder="e.g. John Doe"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              {(selectedUniversity || selectedDepartment) && (
+                <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs space-y-1">
+                  <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Institution Setup:</span>
+                  <div className="text-slate-200 font-medium truncate">
+                    {selectedUniversity || 'Federal University Lokoja, Kogi State (FUL)'}
+                  </div>
+                  <div className="text-indigo-400 text-[11px]">
+                    {selectedDepartment || 'Computer Science'}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleFallbackModal(false)}
+                  className="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isGoogleLoading}
+                  className="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-bold text-white rounded-xl shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isGoogleLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <span>Continue</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

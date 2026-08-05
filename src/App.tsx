@@ -37,6 +37,7 @@ import { TrialAlertModal } from './components/TrialAlertModal';
 import { AboutModal } from './components/AboutModal';
 import { FeaturesPdfModal } from './components/FeaturesPdfModal';
 import { MenCoreWidget } from './components/MenCoreWidget';
+import { FaceArenaView } from './components/FaceArenaView';
 
 export default function App() {
   // Day / Night Theme Mode State
@@ -450,6 +451,13 @@ export default function App() {
             currentUser={currentUser}
             universities={universities}
             courses={courses}
+          />
+        )}
+
+        {activeTab === 'face_arena' && currentUser && (
+          <FaceArenaView
+            user={currentUser}
+            onNavigate={handleNavigate}
           />
         )}
 

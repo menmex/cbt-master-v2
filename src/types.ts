@@ -1730,8 +1730,73 @@ export interface MenCoreSettings {
   themeColor: 'indigo' | 'emerald' | 'violet' | 'amber' | 'blue';
   glowingAnimation: boolean;
   restrictedReplyMessage: string;
-  permissions: MenCorePermissions;
+  permissions: any;
 }
+
+export interface FaceArenaSettings {
+  status: 'open' | 'closed' | 'locked';
+  weeklyChallengeId: string;
+  weeklyTitle: string;
+  timerDurationSeconds: number;
+  totalQuestionsCount: number;
+  passingScorePercentage: number;
+  randomizeQuestions: boolean;
+  randomizeOptions: boolean;
+  allowPreviousQuestion: boolean;
+  autoSubmitOnTimeout: boolean;
+  showResultsImmediately: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FaceArenaQuestion {
+  id: string;
+  question: string;
+  optionA: string;
+  optionB: string;
+  optionC: string;
+  optionD: string;
+  correctAnswer: 'A' | 'B' | 'C' | 'D';
+  category?: string;
+}
+
+export interface FaceArenaParticipant {
+  id: string;
+  weeklyChallengeId: string;
+  userId: string;
+  fullName: string;
+  whatsAppNumber: string;
+  date: string;
+  timeStarted: string;
+  timeSubmitted: string | null;
+  timeUsedSeconds: number;
+  questionsAttempted: number;
+  totalQuestions: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  score: number;
+  percentage: number;
+  position?: number;
+  passed: boolean;
+  answers: Record<number, 'A' | 'B' | 'C' | 'D'>;
+  status: 'registered' | 'in_progress' | 'completed';
+}
+
+export interface FaceArenaArchive {
+  id: string;
+  weeklyChallengeId: string;
+  weeklyTitle: string;
+  archivedAt: string;
+  totalParticipants: number;
+  highestScore: number;
+  lowestScore: number;
+  averageScore: number;
+  numberPassed: number;
+  numberFailed: number;
+  participants: FaceArenaParticipant[];
+  settings: FaceArenaSettings;
+}
+
 
 
 

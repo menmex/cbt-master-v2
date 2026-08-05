@@ -36,6 +36,7 @@ import { TopicRequestManagementModule } from './admin/TopicRequestManagementModu
 import { MenCoreManagementModule } from './admin/MenCoreManagementModule';
 import { ReferralManagementModule } from './admin/ReferralManagementModule';
 import { DepartmentManagementModule } from './admin/DepartmentManagementModule';
+import { FaceArenaAdminModule } from './admin/FaceArenaAdminModule';
 import {
   Shield,
   BookOpen,
@@ -118,7 +119,8 @@ export type AdminCategory =
   | 'security_access'
   | 'topic_requests'
   | 'mencore_ai'
-  | 'referral_management';
+  | 'referral_management'
+  | 'face_arena';
 
 export type AdminRole =
   | 'Super Administrator'
@@ -1381,6 +1383,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <p className="text-xl font-black text-white mt-1 group-hover:text-indigo-300 transition-colors">{studentsList.length}</p>
                 <span className="text-[10px] text-emerald-400 font-medium mt-1 block">Registered Users</span>
+              </button>
+
+              <button
+                onClick={() => setActiveCategory('face_arena')}
+                className="bg-slate-900 hover:bg-slate-800/80 border-2 border-amber-500/40 hover:border-amber-400 p-4 rounded-xl text-left transition-all cursor-pointer group shadow-lg shadow-amber-500/10"
+                id="admin-overview-face-arena-card"
+              >
+                <div className="flex justify-between items-start">
+                  <span className="text-[11px] text-amber-300 font-bold">Face Arena Challenge</span>
+                  <span className="text-[10px] text-amber-400 font-bold bg-amber-500/20 px-1.5 py-0.5 rounded">
+                    🏆 Weekly
+                  </span>
+                </div>
+                <p className="text-xl font-black text-white mt-1 group-hover:text-amber-300 transition-colors">
+                  Control Panel
+                </p>
+                <span className="text-[10px] text-amber-400 font-medium mt-1 block">
+                  Manage Questions & Quiz
+                </span>
               </button>
 
               <button
@@ -4011,6 +4032,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* --- Sign-Up Faculties & Departments Catalog Interface --- */}
       {activeCategory === 'signup_departments' && (
         <DepartmentManagementModule />
+      )}
+
+      {/* --- Face Arena Weekly Quiz Challenge Management --- */}
+      {activeCategory === 'face_arena' && (
+        <FaceArenaAdminModule />
       )}
 
       {/* Role Permissions Matrix Modal */}

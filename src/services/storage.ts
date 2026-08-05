@@ -32,6 +32,10 @@ import {
   LearningResourceItem,
   CommunityAnnouncement,
   FacultyGroup,
+  FaceArenaSettings,
+  FaceArenaQuestion,
+  FaceArenaParticipant,
+  FaceArenaArchive,
   DEFAULT_FACULTY_DEPARTMENTS,
   SEED_UNIVERSITIES,
   SEED_FACULTIES,
@@ -119,7 +123,11 @@ export function stripNonSerializable(val: any, seen = new WeakSet<any>(), depth 
       }
     }
 
-    const cName = val?.constructor?.name || '';
+    let cName = '';
+    try {
+      cName = val?.constructor?.name || '';
+    } catch {}
+
     let isSdk = false;
     try {
       isSdk =
@@ -127,6 +135,9 @@ export function stripNonSerializable(val: any, seen = new WeakSet<any>(), depth 
         cName === 'Ka' ||
         cName === 'UserImpl' ||
         cName === 'AuthImpl' ||
+        cName.includes('Auth') ||
+        cName.includes('Firebase') ||
+        cName.includes('Firestore') ||
         (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date') ||
         ('_delegate' in val) ||
         ('_firestore' in val) ||
@@ -134,7 +145,9 @@ export function stripNonSerializable(val: any, seen = new WeakSet<any>(), depth 
         ('_query' in val) ||
         ('_key' in val) ||
         ('_path' in val) ||
-        ('src' in val && 'i' in val);
+        ('src' in val && 'i' in val) ||
+        ('i' in val && typeof val.i === 'object' && val.i !== null) ||
+        ('src' in val && typeof val.src === 'object' && val.src !== null);
     } catch {
       isSdk = true;
     }
@@ -265,14 +278,29 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date' && cName !== 'Number' && cName !== 'Boolean' && cName !== 'String');
       if (!isCircularSdkObject) {
         try {
-          if ('_delegate' in val || '_firestore' in val || '_auth' in val || '_query' in val || '_key' in val || '_path' in val || '_model' in val || '_app' in val || 'stsTokenManager' in val || 'proactiveRefresh' in val || 'reloadUserInfo' in val) {
+          if (
+            '_delegate' in val ||
+            '_firestore' in val ||
+            '_auth' in val ||
+            '_query' in val ||
+            '_key' in val ||
+            '_path' in val ||
+            '_model' in val ||
+            '_app' in val ||
+            'stsTokenManager' in val ||
+            'proactiveRefresh' in val ||
+            'reloadUserInfo' in val
+          ) {
             isCircularSdkObject = true;
           }
         } catch {}
       }
       if (!isCircularSdkObject) {
         try {
-          if (('i' in val && typeof val.i === 'object' && val.i !== null && 'src' in val.i) || ('src' in val && 'i' in val && typeof val.src === 'object')) {
+          if (
+            ('i' in val && typeof val.i === 'object' && val.i !== null) ||
+            ('src' in val && typeof val.src === 'object' && val.src !== null)
+          ) {
             isCircularSdkObject = true;
           }
         } catch {}
@@ -553,7 +581,130 @@ const STORAGE_KEYS = {
   COMMUNITY_ANNOUNCEMENTS: 'cbt_community_announcements',
   REFERRAL_LEADERBOARD_CONFIG: 'cbt_referral_leaderboard_config',
   SIGNUP_FACULTY_GROUPS: 'cbt_signup_faculty_groups',
+  FACE_ARENA_SETTINGS: 'cbt_face_arena_settings',
+  FACE_ARENA_QUESTIONS: 'cbt_face_arena_questions',
+  FACE_ARENA_PARTICIPANTS: 'cbt_face_arena_participants',
+  FACE_ARENA_ARCHIVES: 'cbt_face_arena_archives',
 };
+
+const DEFAULT_FACE_ARENA_SETTINGS: FaceArenaSettings = {
+  status: 'open',
+  weeklyChallengeId: 'week-1',
+  weeklyTitle: 'Face Arena - Week 1 Challenge',
+  timerDurationSeconds: 60,
+  totalQuestionsCount: 10,
+  passingScorePercentage: 50,
+  randomizeQuestions: true,
+  randomizeOptions: false,
+  allowPreviousQuestion: true,
+  autoSubmitOnTimeout: true,
+  showResultsImmediately: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const DEFAULT_FACE_ARENA_QUESTIONS: FaceArenaQuestion[] = [
+  {
+    id: 'faq-1',
+    question: 'Which of the following process models is best suited for projects with volatile requirements and high customer involvement?',
+    optionA: 'Waterfall Model',
+    optionB: 'Agile / Scrum',
+    optionC: 'V-Model',
+    optionD: 'Big Bang Model',
+    correctAnswer: 'B',
+    category: 'Software Engineering',
+  },
+  {
+    id: 'faq-2',
+    question: 'In computer networking, which protocol provides reliable, connection-oriented data transmission at the Transport layer?',
+    optionA: 'UDP',
+    optionB: 'IP',
+    optionC: 'TCP',
+    optionD: 'ICMP',
+    correctAnswer: 'C',
+    category: 'Computer Networks',
+  },
+  {
+    id: 'faq-3',
+    question: 'What is the time complexity of searching for an element in a balanced Binary Search Tree (BST)?',
+    optionA: 'O(1)',
+    optionB: 'O(n)',
+    optionC: 'O(log n)',
+    optionD: 'O(n^2)',
+    correctAnswer: 'C',
+    category: 'Data Structures',
+  },
+  {
+    id: 'faq-4',
+    question: 'Which SQL keyword is used to sort the result-set in descending order?',
+    optionA: 'ORDER BY DESC',
+    optionB: 'SORT DESC',
+    optionC: 'GROUP BY DESC',
+    optionD: 'ORDER DOWN',
+    correctAnswer: 'A',
+    category: 'Database Systems',
+  },
+  {
+    id: 'faq-5',
+    question: 'In object-oriented programming, what principle allows a single interface to represent different underlying data types?',
+    optionA: 'Encapsulation',
+    optionB: 'Polymorphism',
+    optionC: 'Abstraction',
+    optionD: 'Inheritance',
+    correctAnswer: 'B',
+    category: 'OOP Principles',
+  },
+  {
+    id: 'faq-6',
+    question: 'Which of the following CPU scheduling algorithms is non-preemptive and prone to starvation for long processes?',
+    optionA: 'Round Robin (RR)',
+    optionB: 'First-Come, First-Served (FCFS)',
+    optionC: 'Shortest Remaining Time First (SRTF)',
+    optionD: 'Priority Scheduling (Preemptive)',
+    correctAnswer: 'B',
+    category: 'Operating Systems',
+  },
+  {
+    id: 'faq-7',
+    question: 'What is the primary function of DNS in a network ecosystem?',
+    optionA: 'To encrypt HTTP traffic',
+    optionB: 'To map domain names to IP addresses',
+    optionC: 'To dynamically assign IP addresses to hosts',
+    optionD: 'To filter malicious network packets',
+    correctAnswer: 'B',
+    category: 'Networking',
+  },
+  {
+    id: 'faq-8',
+    question: 'In HTTP response status codes, what does status code 403 signify?',
+    optionA: 'Not Found',
+    optionB: 'Unauthorized',
+    optionC: 'Forbidden',
+    optionD: 'Internal Server Error',
+    correctAnswer: 'C',
+    category: 'Web Architecture',
+  },
+  {
+    id: 'faq-9',
+    question: 'Which gate outputs HIGH (1) only if all of its inputs are HIGH (1)?',
+    optionA: 'OR Gate',
+    optionB: 'NAND Gate',
+    optionC: 'AND Gate',
+    optionD: 'XOR Gate',
+    correctAnswer: 'C',
+    category: 'Digital Electronics',
+  },
+  {
+    id: 'faq-10',
+    question: 'Which of the following hashing algorithms produces a 256-bit hash value?',
+    optionA: 'MD5',
+    optionB: 'SHA-1',
+    optionC: 'SHA-256',
+    optionD: 'CRC32',
+    correctAnswer: 'C',
+    category: 'Cybersecurity',
+  }
+];
 
 const DEFAULT_USER: UserProfile = {
   id: 'usr-student-1',
@@ -987,6 +1138,24 @@ export class StorageService {
       this.unsubscribers.push(unsubReferralLeaderboardConfig);
     } catch (err) {
       console.warn('Failed to attach referral_leaderboard listener:', err);
+    }
+
+    // 17. Real-time Face Arena Settings Listener
+    try {
+      const unsubFaceArenaSettings = onSnapshot(
+        doc(db, 'system_configs', 'face_arena_settings'),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            this.setItem(STORAGE_KEYS.FACE_ARENA_SETTINGS, docSnap.data() as FaceArenaSettings);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'system_configs/face_arena_settings');
+        }
+      );
+      this.unsubscribers.push(unsubFaceArenaSettings);
+    } catch (err) {
+      console.warn('Failed to attach face_arena_settings listener:', err);
     }
   }
 
@@ -1647,6 +1816,117 @@ export class StorageService {
         );
       }
     });
+  }
+
+  // Face Arena Weekly Quiz Challenge Methods
+  static getFaceArenaSettings(): FaceArenaSettings {
+    return this.getItem<FaceArenaSettings>(STORAGE_KEYS.FACE_ARENA_SETTINGS, DEFAULT_FACE_ARENA_SETTINGS);
+  }
+
+  static saveFaceArenaSettings(settings: FaceArenaSettings): void {
+    this.setItem(STORAGE_KEYS.FACE_ARENA_SETTINGS, settings);
+    setDoc(doc(db, 'system_configs', 'face_arena_settings'), safeClone(settings), { merge: true }).catch((err) =>
+      handleFirestoreError(err, OperationType.WRITE, 'system_configs/face_arena_settings')
+    );
+  }
+
+  static getFaceArenaQuestions(): FaceArenaQuestion[] {
+    return this.getItem<FaceArenaQuestion[]>(STORAGE_KEYS.FACE_ARENA_QUESTIONS, DEFAULT_FACE_ARENA_QUESTIONS);
+  }
+
+  static saveFaceArenaQuestions(questions: FaceArenaQuestion[]): void {
+    this.setItem(STORAGE_KEYS.FACE_ARENA_QUESTIONS, questions);
+  }
+
+  static getFaceArenaParticipants(): FaceArenaParticipant[] {
+    return this.getItem<FaceArenaParticipant[]>(STORAGE_KEYS.FACE_ARENA_PARTICIPANTS, []);
+  }
+
+  static saveFaceArenaParticipants(participants: FaceArenaParticipant[]): void {
+    this.setItem(STORAGE_KEYS.FACE_ARENA_PARTICIPANTS, participants);
+  }
+
+  static saveFaceArenaParticipant(participant: FaceArenaParticipant): void {
+    const list = this.getFaceArenaParticipants();
+    const existingIndex = list.findIndex(
+      (p) => p.id === participant.id || (p.userId === participant.userId && p.weeklyChallengeId === participant.weeklyChallengeId)
+    );
+    if (existingIndex >= 0) {
+      list[existingIndex] = participant;
+    } else {
+      list.unshift(participant);
+    }
+    this.saveFaceArenaParticipants(list);
+  }
+
+  static getFaceArenaArchives(): FaceArenaArchive[] {
+    return this.getItem<FaceArenaArchive[]>(STORAGE_KEYS.FACE_ARENA_ARCHIVES, []);
+  }
+
+  static saveFaceArenaArchives(archives: FaceArenaArchive[]): void {
+    this.setItem(STORAGE_KEYS.FACE_ARENA_ARCHIVES, archives);
+  }
+
+  static archiveCurrentWeeklyChallenge(): FaceArenaArchive | null {
+    const settings = this.getFaceArenaSettings();
+    const participants = this.getFaceArenaParticipants();
+    const currentChallengeParticipants = participants.filter(
+      (p) => p.weeklyChallengeId === settings.weeklyChallengeId && p.status === 'completed'
+    );
+
+    if (currentChallengeParticipants.length === 0 && participants.length === 0) {
+      return null;
+    }
+
+    const scores = currentChallengeParticipants.map((p) => p.score);
+    const highestScore = scores.length > 0 ? Math.max(...scores) : 0;
+    const lowestScore = scores.length > 0 ? Math.min(...scores) : 0;
+    const averageScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    const numberPassed = currentChallengeParticipants.filter((p) => p.passed).length;
+    const numberFailed = currentChallengeParticipants.length - numberPassed;
+
+    const archive: FaceArenaArchive = {
+      id: `archive-${Date.now()}`,
+      weeklyChallengeId: settings.weeklyChallengeId,
+      weeklyTitle: settings.weeklyTitle,
+      archivedAt: new Date().toISOString(),
+      totalParticipants: currentChallengeParticipants.length,
+      highestScore,
+      lowestScore,
+      averageScore,
+      numberPassed,
+      numberFailed,
+      participants: safeClone(currentChallengeParticipants),
+      settings: safeClone(settings),
+    };
+
+    const archives = this.getFaceArenaArchives();
+    archives.unshift(archive);
+    this.saveFaceArenaArchives(archives);
+    return archive;
+  }
+
+  static startNewWeeklyChallenge(newTitle: string, newWeekId?: string): FaceArenaSettings {
+    // 1. Archive current challenge
+    this.archiveCurrentWeeklyChallenge();
+
+    // 2. Generate new week ID
+    const archives = this.getFaceArenaArchives();
+    const weekNum = archives.length + 1;
+    const weeklyChallengeId = newWeekId || `week-${weekNum}`;
+
+    // 3. Update settings for new challenge
+    const newSettings: FaceArenaSettings = {
+      ...this.getFaceArenaSettings(),
+      status: 'open',
+      weeklyChallengeId,
+      weeklyTitle: newTitle || `Face Arena - Week ${weekNum} Challenge`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.saveFaceArenaSettings(newSettings);
+    return newSettings;
   }
 
   static addMaterial(material: StudyMaterial): void {

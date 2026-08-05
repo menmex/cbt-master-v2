@@ -178,6 +178,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                     Mock CBT
                   </button>
                   <button
+                    onClick={() => onNavigate('face_arena')}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                      activeTab === 'face_arena' ? 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40 font-bold' : 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10'
+                    }`}
+                    id="nav-btn-face-arena"
+                  >
+                    <Award className="w-4 h-4 text-amber-500" />
+                    <span>🏆 Face Arena</span>
+                  </button>
+                  <button
                     onClick={() => onNavigate('community')}
                     className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
                       activeTab === 'community' ? 'bg-indigo-50 dark:bg-indigo-600/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40' : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
