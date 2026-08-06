@@ -36,6 +36,7 @@ interface NavbarProps {
   onOpenEditProfile?: () => void;
   onOpenAbout?: () => void;
   onOpenFeaturesPdf?: () => void;
+  onOpenNotificationCenter?: () => void;
   themeMode?: 'dark' | 'light';
   onToggleTheme?: () => void;
 }
@@ -51,6 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenEditProfile,
   onOpenAbout,
   onOpenFeaturesPdf,
+  onOpenNotificationCenter,
   themeMode = 'dark',
   onToggleTheme,
 }) => {
@@ -384,7 +386,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Notifications Button */}
           {isLoggedIn && (
             <button
-              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              onClick={() => {
+                if (onOpenNotificationCenter) {
+                  onOpenNotificationCenter();
+                } else {
+                  setNotificationsOpen(!notificationsOpen);
+                }
+              }}
               className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-slate-800 transition-colors relative cursor-pointer"
               id="notification-bell-btn"
               title="Notifications"

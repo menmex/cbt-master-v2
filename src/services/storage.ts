@@ -240,28 +240,7 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       cName = '';
     }
 
-    // Firebase Auth User
-    try {
-      if (
-        val.stsTokenManager ||
-        val.proactiveRefresh ||
-        val.reloadUserInfo ||
-        val.reloadListener ||
-        (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
-      ) {
-        return {
-          id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
-          uid: typeof val.uid === 'string' ? val.uid : undefined,
-          email: typeof val.email === 'string' ? val.email : undefined,
-          displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
-          photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
-        };
-      }
-    } catch {
-      // ignore
-    }
-
-    // Minified Firebase Auth / Firestore SDK internal circular objects (Y2, Ka, etc.)
+    // 1. Minified Firebase Auth / Firestore SDK internal circular objects (Y2, Ka, etc.)
     let isCircularSdkObject = false;
     try {
       isCircularSdkObject =
@@ -287,19 +266,10 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
             '_path' in val ||
             '_model' in val ||
             '_app' in val ||
-            'stsTokenManager' in val ||
-            'proactiveRefresh' in val ||
-            'reloadUserInfo' in val
-          ) {
-            isCircularSdkObject = true;
-          }
-        } catch {}
-      }
-      if (!isCircularSdkObject) {
-        try {
-          if (
+            ('src' in val && 'i' in val) ||
             ('i' in val && typeof val.i === 'object' && val.i !== null) ||
-            ('src' in val && typeof val.src === 'object' && val.src !== null)
+            ('src' in val && typeof val.src === 'object' && val.src !== null) ||
+            ('stsTokenManager' in val && 'apiKey' in val)
           ) {
             isCircularSdkObject = true;
           }
@@ -307,6 +277,27 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       }
     } catch {
       isCircularSdkObject = true;
+    }
+
+    // 2. Firebase Auth User
+    try {
+      if (
+        val.stsTokenManager ||
+        val.proactiveRefresh ||
+        val.reloadUserInfo ||
+        val.reloadListener ||
+        (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
+      ) {
+        return {
+          id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
+          uid: typeof val.uid === 'string' ? val.uid : undefined,
+          email: typeof val.email === 'string' ? val.email : undefined,
+          displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
+          photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
+        };
+      }
+    } catch {
+      // ignore
     }
 
     if (isCircularSdkObject) {
@@ -387,6 +378,17 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       });
     }
 
+    // Check if object is a custom non-plain class instance (e.g., internal SDK object)
+    const isPlainObject =
+      val.constructor === Object ||
+      val.constructor === undefined ||
+      Object.getPrototypeOf(val) === null ||
+      Object.getPrototypeOf(val) === Object.prototype;
+
+    if (!isPlainObject) {
+      return `[SDK Class: ${cName || 'Internal'}]`;
+    }
+
     // For general plain objects: construct a clean plain object ({}) with no prototype methods or toJSON
     const cleanObj: Record<string, any> = {};
     let keys: string[] = [];
@@ -446,6 +448,7 @@ export function safeStringify(obj: any, indent?: number): string {
 
   try {
     const clean = sanitizeForJSON(obj);
+    if (typeof clean === 'string') return clean;
     const seenSet = new WeakSet();
     const result = JSON.stringify(
       clean,
@@ -484,6 +487,7 @@ export function safeStringify(obj: any, indent?: number): string {
   } catch (err) {
     try {
       const stripped = stripNonSerializable(obj);
+      if (typeof stripped === 'string') return stripped;
       const seenSet = new WeakSet();
       return (
         JSON.stringify(
@@ -510,18 +514,13 @@ export function safeStringify(obj: any, indent?: number): string {
 export function safeClone<T>(obj: T): T {
   if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
   try {
-    const clean = sanitizeForJSON(obj);
-    const jsonStr = safeStringify(clean);
-    if (jsonStr === 'undefined' || jsonStr === 'null' || !jsonStr || jsonStr === '{}') return obj;
-    return JSON.parse(jsonStr);
-  } catch (err) {
-    try {
-      const stripped = stripNonSerializable(obj);
-      const jsonStr = safeStringify(stripped);
+    const jsonStr = safeStringify(obj);
+    if (jsonStr && jsonStr !== 'undefined' && jsonStr !== 'null') {
       return JSON.parse(jsonStr);
-    } catch {
-      return (Array.isArray(obj) ? [] : {}) as T;
     }
+    return (Array.isArray(obj) ? [] : {}) as T;
+  } catch {
+    return (Array.isArray(obj) ? [] : {}) as T;
   }
 }
 
@@ -591,6 +590,11 @@ const DEFAULT_FACE_ARENA_SETTINGS: FaceArenaSettings = {
   status: 'open',
   weeklyChallengeId: 'week-1',
   weeklyTitle: 'Face Arena - Week 1 Challenge',
+  description: 'Join the premier weekly CBT contest! Answer exam questions in real-time, rank on the national leaderboard, and win grand prizes.',
+  bannerUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&auto=format&fit=crop&q=80',
+  startDate: new Date().toISOString(),
+  endDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+  isPublished: true,
   timerDurationSeconds: 60,
   totalQuestionsCount: 10,
   passingScorePercentage: 50,
@@ -1156,6 +1160,90 @@ export class StorageService {
       this.unsubscribers.push(unsubFaceArenaSettings);
     } catch (err) {
       console.warn('Failed to attach face_arena_settings listener:', err);
+    }
+
+    // 18. Real-time Face Arena Questions Listener
+    try {
+      const unsubFaceArenaQuestions = onSnapshot(
+        collection(db, 'face_arena_questions'),
+        (snapshot) => {
+          const list: FaceArenaQuestion[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as FaceArenaQuestion);
+          });
+          if (list.length > 0) {
+            this.setItem(STORAGE_KEYS.FACE_ARENA_QUESTIONS, list);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'face_arena_questions');
+        }
+      );
+      this.unsubscribers.push(unsubFaceArenaQuestions);
+    } catch (err) {
+      console.warn('Failed to attach face_arena_questions listener:', err);
+    }
+
+    // 19. Real-time Face Arena Participants Listener
+    try {
+      const unsubFaceArenaParticipants = onSnapshot(
+        collection(db, 'face_arena_participants'),
+        (snapshot) => {
+          const list: FaceArenaParticipant[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as FaceArenaParticipant);
+          });
+          this.setItem(STORAGE_KEYS.FACE_ARENA_PARTICIPANTS, list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'face_arena_participants');
+        }
+      );
+      this.unsubscribers.push(unsubFaceArenaParticipants);
+    } catch (err) {
+      console.warn('Failed to attach face_arena_participants listener:', err);
+    }
+
+    // 20. Real-time Face Arena Archives Listener
+    try {
+      const unsubFaceArenaArchives = onSnapshot(
+        collection(db, 'face_arena_archives'),
+        (snapshot) => {
+          const list: FaceArenaArchive[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as FaceArenaArchive);
+          });
+          this.setItem(STORAGE_KEYS.FACE_ARENA_ARCHIVES, list);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'face_arena_archives');
+        }
+      );
+      this.unsubscribers.push(unsubFaceArenaArchives);
+    } catch (err) {
+      console.warn('Failed to attach face_arena_archives listener:', err);
+    }
+
+    // 21. Real-time Admin Notifications Listener
+    try {
+      const unsubAdminNotifications = onSnapshot(
+        collection(db, 'admin_notifications'),
+        (snapshot) => {
+          const list: AdminNotification[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as AdminNotification);
+          });
+          if (list.length > 0) {
+            this.setItem(STORAGE_KEYS.ADMIN_NOTIFICATIONS, list);
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'admin_notifications');
+        }
+      );
+      this.unsubscribers.push(unsubAdminNotifications);
+    } catch (err) {
+      console.warn('Failed to attach admin_notifications listener:', err);
     }
   }
 
@@ -1836,6 +1924,19 @@ export class StorageService {
 
   static saveFaceArenaQuestions(questions: FaceArenaQuestion[]): void {
     this.setItem(STORAGE_KEYS.FACE_ARENA_QUESTIONS, questions);
+    questions.forEach((q) => {
+      setDoc(doc(db, 'face_arena_questions', q.id), safeClone(q), { merge: true }).catch((err) =>
+        handleFirestoreError(err, OperationType.WRITE, `face_arena_questions/${q.id}`)
+      );
+    });
+  }
+
+  static deleteFaceArenaQuestion(id: string): void {
+    const list = this.getFaceArenaQuestions().filter((q) => q.id !== id);
+    this.setItem(STORAGE_KEYS.FACE_ARENA_QUESTIONS, list);
+    deleteDoc(doc(db, 'face_arena_questions', id)).catch((err) =>
+      handleFirestoreError(err, OperationType.DELETE, `face_arena_questions/${id}`)
+    );
   }
 
   static getFaceArenaParticipants(): FaceArenaParticipant[] {
@@ -1844,6 +1945,11 @@ export class StorageService {
 
   static saveFaceArenaParticipants(participants: FaceArenaParticipant[]): void {
     this.setItem(STORAGE_KEYS.FACE_ARENA_PARTICIPANTS, participants);
+    participants.forEach((p) => {
+      setDoc(doc(db, 'face_arena_participants', p.id), safeClone(p), { merge: true }).catch((err) =>
+        handleFirestoreError(err, OperationType.WRITE, `face_arena_participants/${p.id}`)
+      );
+    });
   }
 
   static saveFaceArenaParticipant(participant: FaceArenaParticipant): void {
@@ -1857,6 +1963,9 @@ export class StorageService {
       list.unshift(participant);
     }
     this.saveFaceArenaParticipants(list);
+    setDoc(doc(db, 'face_arena_participants', participant.id), safeClone(participant), { merge: true }).catch((err) =>
+      handleFirestoreError(err, OperationType.WRITE, `face_arena_participants/${participant.id}`)
+    );
   }
 
   static getFaceArenaArchives(): FaceArenaArchive[] {
@@ -1865,6 +1974,11 @@ export class StorageService {
 
   static saveFaceArenaArchives(archives: FaceArenaArchive[]): void {
     this.setItem(STORAGE_KEYS.FACE_ARENA_ARCHIVES, archives);
+    archives.forEach((arc) => {
+      setDoc(doc(db, 'face_arena_archives', arc.id), safeClone(arc), { merge: true }).catch((err) =>
+        handleFirestoreError(err, OperationType.WRITE, `face_arena_archives/${arc.id}`)
+      );
+    });
   }
 
   static archiveCurrentWeeklyChallenge(): FaceArenaArchive | null {

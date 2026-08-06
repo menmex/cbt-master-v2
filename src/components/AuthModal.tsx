@@ -541,7 +541,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         // For domain restriction (auth/unauthorized-domain), operation-not-allowed or network failure,
         // fallback gracefully to local registration so student can sign up seamlessly.
-        console.warn('Firebase Auth notice during registration:', authErr);
+        console.warn('Firebase Auth notice during registration:', (authErr as any)?.message || String(authErr));
       }
 
       // Validate referral code if user provided one
@@ -1027,7 +1027,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
     } catch (error: any) {
-      console.warn('Google Sign-In Popup note:', error);
+      console.warn('Google Sign-In Popup note:', error?.message || String(error));
       const code = error?.code || '';
       const msg = error?.message || '';
 
@@ -1150,7 +1150,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           };
         }
       } catch (fsErr) {
-        console.warn('Firestore user fetch warning during recovery:', fsErr);
+        console.warn('Firestore user fetch warning during recovery:', (fsErr as any)?.message || String(fsErr));
       }
 
       if (!matched) {

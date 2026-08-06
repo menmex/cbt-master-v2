@@ -1737,6 +1737,11 @@ export interface FaceArenaSettings {
   status: 'open' | 'closed' | 'locked';
   weeklyChallengeId: string;
   weeklyTitle: string;
+  description?: string;
+  bannerUrl?: string;
+  startDate?: string;
+  endDate?: string;
+  isPublished?: boolean;
   timerDurationSeconds: number;
   totalQuestionsCount: number;
   passingScorePercentage: number;

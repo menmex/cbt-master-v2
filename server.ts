@@ -180,6 +180,120 @@ Requirements for each question:
   }
 });
 
+// API Route: Smart Upload & Format AI Questions for Question Bank & FaceArena
+app.post("/api/ai/smart-upload-questions", async (req, res) => {
+  try {
+    const {
+      mode = "generate_material", // "generate_material" | "format_existing"
+      rawText,
+      fileData,
+      mimeType,
+      fileName,
+      category = "General CBT",
+      questionCount = 10,
+    } = req.body;
+
+    const hasFile = !!(fileData && typeof fileData === "string" && fileData.trim().length > 0);
+    const hasText = !!(rawText && typeof rawText === "string" && rawText.trim().length >= 10);
+
+    if (!hasFile && !hasText) {
+      return res.status(400).json({
+        error: "Please upload a document file (PDF, DOCX, TXT) or paste text content.",
+      });
+    }
+
+    const ai = getGeminiAi();
+
+    let systemPrompt = "";
+    if (mode === "format_existing") {
+      systemPrompt = `You are an expert CBT document auditor and question bank compiler.
+Your task is to analyze the provided raw question document/file for category "${category}".
+Extract all multiple-choice questions from the content.
+For each extracted question:
+1. Fix all spelling, grammatical, and typographical errors.
+2. Standardize formatting into clean, unambiguous CBT question statement.
+3. Ensure 4 clear options: optionA, optionB, optionC, optionD.
+4. Detect and verify the correct answer option (must strictly be "A", "B", "C", or "D").
+5. Provide a clear educational explanation for why that answer is correct.
+6. Remove any duplicate questions.
+7. Set category to "${category}".`;
+    } else {
+      systemPrompt = `You are an expert university examiner and CBT question author.
+Analyze the provided study material content for category "${category}".
+Generate exactly ${questionCount} high-quality, exam-standard multiple-choice practice questions.
+Requirements:
+1. "question": Clear question testing key concepts from the material.
+2. "optionA", "optionB", "optionC", "optionD": 4 plausible options.
+3. "correctAnswer": Must strictly be "A", "B", "C", or "D".
+4. "explanation": Step-by-step breakdown of why the answer is correct.
+5. "category": "${category}"`;
+    }
+
+    const contentsParts: any[] = [];
+
+    if (hasFile) {
+      let normalizedMime = mimeType || "application/pdf";
+      const fName = (fileName || "").toLowerCase();
+
+      if (fName.endsWith(".pdf")) normalizedMime = "application/pdf";
+      else if (fName.endsWith(".jpg") || fName.endsWith(".jpeg")) normalizedMime = "image/jpeg";
+      else if (fName.endsWith(".png")) normalizedMime = "image/png";
+      else if (fName.endsWith(".txt")) normalizedMime = "text/plain";
+
+      let cleanBase64 = fileData;
+      if (cleanBase64.includes(",")) {
+        cleanBase64 = cleanBase64.split(",")[1];
+      }
+
+      contentsParts.push({
+        inlineData: {
+          data: cleanBase64,
+          mimeType: normalizedMime,
+        },
+      });
+    }
+
+    if (hasText) {
+      contentsParts.push({
+        text: `Raw Material / Question Document Text:\n"""\n${rawText.slice(0, 30000)}\n"""`,
+      });
+    }
+
+    contentsParts.push({ text: systemPrompt });
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: { parts: contentsParts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              question: { type: Type.STRING },
+              optionA: { type: Type.STRING },
+              optionB: { type: Type.STRING },
+              optionC: { type: Type.STRING },
+              optionD: { type: Type.STRING },
+              correctAnswer: { type: Type.STRING, description: "Must be A, B, C, or D" },
+              explanation: { type: Type.STRING },
+              category: { type: Type.STRING },
+            },
+            required: ["question", "optionA", "optionB", "optionC", "optionD", "correctAnswer"],
+          },
+        },
+      },
+    });
+
+    const questionsParsed = JSON.parse(response.text || "[]");
+    return res.json({ success: true, questions: questionsParsed });
+  } catch (err: any) {
+    console.error("Smart Upload AI Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to process question file." });
+  }
+});
+
 // API Route: Generate AI Explanation for a question
 app.post("/api/ai/explain-question", async (req, res) => {
   try {

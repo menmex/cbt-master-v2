@@ -5,13 +5,12 @@ import {
   FaceArenaParticipant,
   FaceArenaArchive
 } from '../../types';
-import { StorageService } from '../../services/storage';
+import { StorageService, safeStringify } from '../../services/storage';
 import {
   Trophy,
   Play,
   Pause,
   Lock,
-  Unlock,
   Plus,
   Trash2,
   Edit2,
@@ -22,18 +21,22 @@ import {
   Clock,
   Settings,
   CheckCircle2,
-  XCircle,
   BarChart3,
   Search,
-  Filter,
   FileSpreadsheet,
   RotateCcw,
   Archive,
   Save,
   HelpCircle,
   Sparkles,
-  AlertTriangle,
-  Award
+  Award,
+  FileText,
+  Layers,
+  Image,
+  Calendar,
+  Eye,
+  Check,
+  X
 } from 'lucide-react';
 
 export const FaceArenaAdminModule: React.FC = () => {
@@ -66,6 +69,17 @@ export const FaceArenaAdminModule: React.FC = () => {
   const [newChallengeTitle, setNewChallengeTitle] = useState<string>('');
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
+  // Smart AI Upload State
+  const [isSmartUploadOpen, setIsSmartUploadOpen] = useState<boolean>(false);
+  const [smartMode, setSmartMode] = useState<'generate_material' | 'format_existing'>('generate_material');
+  const [smartCategory, setSmartCategory] = useState<string>('General CBT');
+  const [smartRawText, setSmartRawText] = useState<string>('');
+  const [smartFile, setSmartFile] = useState<File | null>(null);
+  const [smartCount, setSmartCount] = useState<number>(10);
+  const [isProcessingSmartUpload, setIsProcessingSmartUpload] = useState<boolean>(false);
+  const [previewSmartQuestions, setPreviewSmartQuestions] = useState<FaceArenaQuestion[]>([]);
+  const [isSmartPreviewStep, setIsSmartPreviewStep] = useState<boolean>(false);
+
   const showNotice = (msg: string) => {
     setNotificationMsg(msg);
     setTimeout(() => setNotificationMsg(null), 4000);
@@ -89,7 +103,7 @@ export const FaceArenaAdminModule: React.FC = () => {
   const handleSaveSettings = (updated: FaceArenaSettings) => {
     setSettings(updated);
     StorageService.saveFaceArenaSettings(updated);
-    showNotice('Face Arena settings updated successfully.');
+    showNotice('Face Arena settings updated & synchronized in real-time.');
   };
 
   // Toggle Status (Enable / Disable / Lock / Reopen)
@@ -175,7 +189,7 @@ export const FaceArenaAdminModule: React.FC = () => {
     if (!confirm('Are you sure you want to delete this question?')) return;
     const updated = questions.filter((q) => q.id !== qId);
     setQuestions(updated);
-    StorageService.saveFaceArenaQuestions(updated);
+    StorageService.deleteFaceArenaQuestion(qId);
     showNotice('Question deleted.');
   };
 
@@ -188,7 +202,7 @@ export const FaceArenaAdminModule: React.FC = () => {
 
   // Export Questions JSON
   const handleExportQuestions = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(questions, null, 2));
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(safeStringify(questions, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', `face_arena_questions_${Date.now()}.json`);
@@ -216,6 +230,83 @@ export const FaceArenaAdminModule: React.FC = () => {
         }
       };
     }
+  };
+
+  // Handle Smart AI Upload Process
+  const handleRunSmartUpload = async () => {
+    if (!smartRawText.trim() && !smartFile) {
+      alert('Please enter text content or upload a document file (PDF, DOCX, TXT).');
+      return;
+    }
+
+    setIsProcessingSmartUpload(true);
+    try {
+      let fileDataStr = '';
+      let mimeTypeStr = '';
+      let fileNameStr = '';
+
+      if (smartFile) {
+        fileNameStr = smartFile.name;
+        mimeTypeStr = smartFile.type || 'application/pdf';
+        fileDataStr = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(smartFile);
+        });
+      }
+
+      const response = await fetch('/api/ai/smart-upload-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: smartMode,
+          rawText: smartRawText,
+          fileData: fileDataStr,
+          mimeType: mimeTypeStr,
+          fileName: fileNameStr,
+          category: smartCategory,
+          questionCount: smartCount,
+        }),
+      });
+
+      const resData = await response.json();
+      if (!resData.success || !Array.isArray(resData.questions)) {
+        throw new Error(resData.error || 'Failed to process document with AI.');
+      }
+
+      const formatted: FaceArenaQuestion[] = resData.questions.map((q: any, i: number) => ({
+        id: `faq-ai-${Date.now()}-${i}`,
+        question: q.question || 'Processed Question',
+        optionA: q.optionA || 'Option A',
+        optionB: q.optionB || 'Option B',
+        optionC: q.optionC || 'Option C',
+        optionD: q.optionD || 'Option D',
+        correctAnswer: (['A', 'B', 'C', 'D'].includes(q.correctAnswer?.toUpperCase()) ? q.correctAnswer.toUpperCase() : 'A') as any,
+        category: q.category || smartCategory,
+      }));
+
+      setPreviewSmartQuestions(formatted);
+      setIsSmartPreviewStep(true);
+      showNotice(`AI successfully processed ${formatted.length} questions. Please review below.`);
+    } catch (err: any) {
+      alert(`Smart Upload Error: ${err.message || 'Failed to process document.'}`);
+    } finally {
+      setIsProcessingSmartUpload(false);
+    }
+  };
+
+  const handleConfirmImportSmartQuestions = () => {
+    if (previewSmartQuestions.length === 0) return;
+    const merged = [...previewSmartQuestions, ...questions];
+    setQuestions(merged);
+    StorageService.saveFaceArenaQuestions(merged);
+    setIsSmartUploadOpen(false);
+    setIsSmartPreviewStep(false);
+    setPreviewSmartQuestions([]);
+    setSmartRawText('');
+    setSmartFile(null);
+    showNotice(`Successfully added ${previewSmartQuestions.length} questions to Question Bank!`);
   };
 
   // Export Participant Records CSV
@@ -423,6 +514,38 @@ export const FaceArenaAdminModule: React.FC = () => {
               </div>
             </div>
 
+            {/* Challenge Title & Description Edit Panel */}
+            <div className="p-5 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-4">
+              <h3 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Edit2 className="w-4 h-4 text-indigo-400" />
+                Challenge Details
+              </h3>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Challenge Title</label>
+                  <input
+                    type="text"
+                    value={settings.weeklyTitle || ''}
+                    onChange={(e) => handleSaveSettings({ ...settings, weeklyTitle: e.target.value })}
+                    placeholder="e.g. Face Arena - Week 1 Challenge"
+                    className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Description / Instructions</label>
+                  <textarea
+                    rows={2}
+                    value={settings.description || ''}
+                    onChange={(e) => handleSaveSettings({ ...settings, description: e.target.value })}
+                    placeholder="Enter challenge description..."
+                    className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="p-5 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3">
               <h3 className="text-xs font-extrabold text-slate-300 uppercase tracking-wider">
                 Quick Action Controls
@@ -483,11 +606,19 @@ export const FaceArenaAdminModule: React.FC = () => {
                 Face Arena Question Management
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Add, edit, import, export, or shuffle questions specifically for the Face Arena challenge.
+                Add, edit, import, export, or AI-generate questions specifically for the Face Arena challenge.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setIsSmartUploadOpen(true)}
+                className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                id="face-arena-smart-upload-btn"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                Smart Upload (AI)
+              </button>
               <button
                 onClick={() => {
                   setEditingQuestion(null);
@@ -581,6 +712,281 @@ export const FaceArenaAdminModule: React.FC = () => {
                   </div>
                 </div>
               ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: SMART AI QUESTION UPLOAD ================= */}
+      {isSmartUploadOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl space-y-4">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-gradient-to-tr from-indigo-600 to-purple-600 text-white rounded-xl">
+                  <Sparkles className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Smart Question Upload (AI Assisted)</h3>
+                  <p className="text-xs text-slate-400">Extract, clean, and format questions automatically using Gemini AI.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsSmartUploadOpen(false);
+                  setIsSmartPreviewStep(false);
+                }}
+                className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {!isSmartPreviewStep ? (
+              <div className="space-y-4 text-xs overflow-y-auto pr-1 flex-1">
+                {/* Mode Selector */}
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1.5">Select Processing Mode</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSmartMode('generate_material')}
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                        smartMode === 'generate_material'
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-md'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="font-bold block text-sm text-indigo-300">Generate from Study Material</span>
+                      <span className="text-[11px] text-slate-400 mt-0.5 block">
+                        AI reads documents/notes and generates exam-standard multiple choice questions.
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSmartMode('format_existing')}
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                        smartMode === 'format_existing'
+                          ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-md'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="font-bold block text-sm text-amber-300">Format Existing Question Document</span>
+                      <span className="text-[11px] text-slate-400 mt-0.5 block">
+                        AI extracts raw questions from PDF/DOCX/TXT, fixes typos, verifies answer keys & removes duplicates.
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Target Category</label>
+                    <input
+                      type="text"
+                      value={smartCategory}
+                      onChange={(e) => setSmartCategory(e.target.value)}
+                      placeholder="e.g. GST101 General Studies"
+                      className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Target Question Count</label>
+                    <input
+                      type="number"
+                      value={smartCount}
+                      onChange={(e) => setSmartCount(Math.max(1, parseInt(e.target.value) || 10))}
+                      className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* File Upload Box */}
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Upload Document File (PDF, DOCX, TXT, Image)</label>
+                  <label className="p-4 bg-slate-950 border border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors text-center">
+                    <FileText className="w-8 h-8 text-indigo-400 mb-1" />
+                    <span className="text-xs font-bold text-white">
+                      {smartFile ? smartFile.name : 'Click or drop PDF / Word document file here'}
+                    </span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">Supports PDF, DOCX, TXT, JPG, PNG (Max 10MB)</span>
+                    <input
+                      type="file"
+                      accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png"
+                      onChange={(e) => e.target.files && setSmartFile(e.target.files[0])}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {/* Raw Text Paste */}
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Or Paste Raw Text Material / Questions</label>
+                  <textarea
+                    rows={4}
+                    value={smartRawText}
+                    onChange={(e) => setSmartRawText(e.target.value)}
+                    placeholder="Paste textbook notes, past questions, or raw text here..."
+                    className="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsSmartUploadOpen(false)}
+                    className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessingSmartUpload}
+                    onClick={handleRunSmartUpload}
+                    className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isProcessingSmartUpload ? (
+                      <>
+                        <Sparkles className="w-4 h-4 animate-spin text-amber-300" />
+                        <span>Processing with AI...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>Process & Extract Questions</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* PREVIEW STEP */
+              <div className="space-y-4 text-xs overflow-y-auto pr-1 flex-1">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 flex items-center justify-between">
+                  <span>Found <strong>{previewSmartQuestions.length}</strong> clean questions ready for review.</span>
+                  <button
+                    onClick={() => setIsSmartPreviewStep(false)}
+                    className="text-xs font-bold text-emerald-400 hover:underline"
+                  >
+                    Re-upload / Change settings
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {previewSmartQuestions.map((q, idx) => (
+                    <div key={q.id} className="p-4 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-400">Q#{idx + 1} • {q.category}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-[10px] font-bold">
+                            Correct: Option {q.correctAnswer}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setPreviewSmartQuestions((prev) => prev.filter((_, i) => i !== idx));
+                            }}
+                            className="p-1 text-rose-400 hover:bg-slate-800 rounded"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <textarea
+                        rows={2}
+                        value={q.question}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPreviewSmartQuestions((prev) =>
+                            prev.map((item, i) => (i === idx ? { ...item, question: val } : item))
+                          );
+                        }}
+                        className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-white font-medium"
+                      />
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 font-bold block mb-0.5">Option A:</span>
+                          <input
+                            type="text"
+                            value={q.optionA}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPreviewSmartQuestions((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, optionA: val } : item))
+                              );
+                            }}
+                            className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-bold block mb-0.5">Option B:</span>
+                          <input
+                            type="text"
+                            value={q.optionB}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPreviewSmartQuestions((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, optionB: val } : item))
+                              );
+                            }}
+                            className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-bold block mb-0.5">Option C:</span>
+                          <input
+                            type="text"
+                            value={q.optionC}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPreviewSmartQuestions((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, optionC: val } : item))
+                              );
+                            }}
+                            className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded text-white"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-bold block mb-0.5">Option D:</span>
+                          <input
+                            type="text"
+                            value={q.optionD}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPreviewSmartQuestions((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, optionD: val } : item))
+                              );
+                            }}
+                            className="w-full p-1.5 bg-slate-900 border border-slate-700 rounded text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsSmartPreviewStep(false)}
+                    className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmImportSmartQuestions}
+                    className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    Confirm & Save to Question Bank
+                  </button>
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       )}
@@ -758,7 +1164,7 @@ export const FaceArenaAdminModule: React.FC = () => {
               </h3>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">Number of Questions (Default: 70)</label>
+                <label className="text-xs font-bold text-slate-300">Number of Questions</label>
                 <input
                   type="number"
                   value={settings.totalQuestionsCount}

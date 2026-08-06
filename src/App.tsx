@@ -38,8 +38,12 @@ import { AboutModal } from './components/AboutModal';
 import { FeaturesPdfModal } from './components/FeaturesPdfModal';
 import { MenCoreWidget } from './components/MenCoreWidget';
 import { FaceArenaView } from './components/FaceArenaView';
+import { InAppNotificationOverlay } from './components/InAppNotificationOverlay';
+import { NotificationCenterModal } from './components/NotificationCenterModal';
 
 export default function App() {
+  const [isNotifCenterOpen, setIsNotifCenterOpen] = useState<boolean>(false);
+
   // Day / Night Theme Mode State
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('cbt_theme_mode');
@@ -350,8 +354,16 @@ export default function App() {
         onOpenEditProfile={() => setEditProfileModalOpen(true)}
         onOpenAbout={() => setAboutModalOpen(true)}
         onOpenFeaturesPdf={() => setFeaturesPdfModalOpen(true)}
+        onOpenNotificationCenter={() => setIsNotifCenterOpen(true)}
         themeMode={themeMode}
         onToggleTheme={toggleThemeMode}
+      />
+
+      {/* Real-time In-App Persistent Pop-Up Notification Broadcast Overlay */}
+      <InAppNotificationOverlay
+        userId={currentUser?.id}
+        userRole={currentUser?.role}
+        onOpenNotificationCenter={() => setIsNotifCenterOpen(true)}
       />
 
       {/* Main View Router */}
@@ -652,6 +664,14 @@ export default function App() {
       <FeaturesPdfModal
         isOpen={featuresPdfModalOpen}
         onClose={() => setFeaturesPdfModalOpen(false)}
+      />
+
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        isOpen={isNotifCenterOpen}
+        onClose={() => setIsNotifCenterOpen(false)}
+        userId={currentUser?.id}
+        userRole={currentUser?.role}
       />
 
       {/* MenCore AI Assistant Widget (Powered by Menmex) */}
