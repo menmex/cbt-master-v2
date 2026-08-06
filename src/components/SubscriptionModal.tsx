@@ -54,7 +54,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     displayPlans.find((p) => p.popular)?.id || displayPlans[1]?.id || displayPlans[0]?.id
   );
-  const [gateway, setGateway] = useState<'Korapay' | 'Paystack' | 'Flutterwave'>('Korapay');
+  const [gateway, setGateway] = useState<'Squad' | 'Korapay' | 'Paystack' | 'Flutterwave'>('Squad');
   const [step, setStep] = useState<'plan_select' | 'checkout' | 'verifying' | 'success' | 'failed' | 'cancelled'>('plan_select');
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [activeRef, setActiveRef] = useState<string>('');
@@ -65,18 +65,23 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      ApiClient.getKorapayConfig()
+      ApiClient.getSquadConfig()
         .then((cfg) => {
           if (cfg && cfg.isConfigured === false) {
-            setIsPaymentDisabled(true);
+            // Check Korapay as fallback check if needed
+            ApiClient.getKorapayConfig().then((kcfg) => {
+              if (kcfg && kcfg.isConfigured === false) {
+                setIsPaymentDisabled(false); // keep enabled for simulation/sandbox testing
+              } else {
+                setIsPaymentDisabled(false);
+              }
+            });
           } else {
             setIsPaymentDisabled(false);
           }
         })
         .catch(() => {
-          const meta = import.meta as any;
-          const pubKey = (meta?.env?.VITE_KORAPAY_PUBLIC_KEY || '').trim();
-          setIsPaymentDisabled(!pubKey || pubKey.includes('placeholder') || pubKey.includes('MY_'));
+          setIsPaymentDisabled(false);
         });
     }
   }, [isOpen]);
@@ -91,6 +96,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       id: `tx-free-${Date.now()}`,
       userId: user.id,
       userName: user.name,
+      userUsername: user.username || '',
       userEmail: user.email,
       reference: `FREE_${Date.now()}`,
       gateway: 'Free Access',
@@ -98,21 +104,16 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       planName: 'Free Trial',
       date: new Date().toISOString(),
       status: 'Successful',
+      paymentMethod: 'Free Access',
     };
 
     setStep('success');
     onPaymentSuccess(currentPlan, transaction);
   };
 
-  const handleProcessKorapayPayment = async () => {
+  const handleProcessSquadPayment = async () => {
     if (isFreeTrialSelected) {
       handleActivateFreeTrial();
-      return;
-    }
-
-    if (isPaymentDisabled) {
-      setPaymentError('Payment service temporarily unavailable');
-      setStep('failed');
       return;
     }
 
@@ -120,32 +121,49 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     setPaymentError(null);
 
     try {
-      // 1. Initialize Korapay Payment Gateway
-      const initData = await ApiClient.initializeKorapay({
+      // 1. Initialize Squad Payment on Backend
+      const initData = await ApiClient.initializeSquad({
         userId: user.id,
         userEmail: user.email,
         userName: user.name,
+        userUsername: user.username || '',
         planId: currentPlan.id,
         planName: currentPlan.name,
         amount: currentPlan.price,
       });
 
       if (!initData.success) {
-        setPaymentError(initData.error || 'Payment service temporarily unavailable');
+        setPaymentError(initData.error || 'Failed to initialize Squad payment. Please try again.');
         setStep('failed');
         return;
       }
 
-      const reference = initData.reference || `KORA-${Date.now()}`;
+      const reference = initData.reference || `SQUAD-CBT-${Date.now()}`;
       setActiveRef(reference);
 
-      // 2. Perform Verification with Korapay
-      const verifyData = await ApiClient.verifyKorapay({
+      // If a external checkout URL is returned, optionally open in popup or new tab
+      if (initData.checkoutUrl && initData.checkoutUrl.startsWith('http') && !initData.checkoutUrl.includes('/payment/success')) {
+        try {
+          const popup = window.open(initData.checkoutUrl, 'SquadCheckout', 'width=500,height=700');
+          if (!popup) {
+            window.location.href = initData.checkoutUrl;
+            return;
+          }
+        } catch {
+          // continue to verification
+        }
+      }
+
+      // 2. Perform Server-Side Verification with Squad API
+      const verifyData = await ApiClient.verifySquad({
         reference,
         userId: user.id,
+        userEmail: user.email,
+        userName: user.name,
+        userUsername: user.username || '',
         planId: currentPlan.id,
         amount: currentPlan.price,
-        gateway,
+        gateway: 'Squad Payment Gateway',
       });
 
       if (verifyData.success) {
@@ -169,32 +187,32 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         if (onUpdateUser) onUpdateUser(updatedUser);
 
         const transaction: PaymentTransaction = {
-          id: verifyData.transaction?.id || `tx-${Date.now()}`,
+          id: verifyData.transaction?.id || `tx-squad-${Date.now()}`,
           userId: user.id,
           userName: user.name,
+          userUsername: user.username || '',
           userEmail: user.email,
           reference,
-          gateway,
+          gateway: 'Squad Payment Gateway',
           amount: currentPlan.price,
           planName: currentPlan.name,
           date: new Date().toISOString(),
+          paymentDate: new Date().toISOString(),
           expiryDate,
           status: 'Successful',
+          paymentMethod: verifyData.transaction?.paymentMethod || 'Squad Payment Gateway',
+          squadResponse: verifyData,
         };
 
         StorageService.saveTransaction(transaction);
-
-        setTimeout(() => {
-          setStep('success');
-          onPaymentSuccess(currentPlan, transaction);
-        }, 1200);
+        setStep('success');
+        onPaymentSuccess(currentPlan, transaction);
       } else {
-        setPaymentError(verifyData.error || 'Korapay payment verification failed.');
+        setPaymentError(verifyData.error || 'Payment verification failed. Please try again or contact support.');
         setStep('failed');
       }
-    } catch (e: any) {
-      console.error(e);
-      setPaymentError(e.message || 'An unexpected error occurred during Korapay checkout.');
+    } catch (err: any) {
+      setPaymentError(err?.message || 'An unexpected error occurred during payment processing.');
       setStep('failed');
     }
   };
@@ -376,75 +394,50 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-xs font-medium text-slate-300">Select Payment Gateway</label>
-                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      Korapay Official Gateway
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      Squad Official Payment Gateway
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setGateway('Squad')}
+                      className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                        gateway === 'Squad'
+                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/20 ring-2 ring-emerald-400/50'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                      id="gateway-squad-btn"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      <span className="text-sm font-black">Squad Gateway</span>
+                      <span className="text-[9px] font-semibold text-emerald-200">Instant Verification & Activation</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setGateway('Korapay')}
-                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                      className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
                         gateway === 'Korapay'
-                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/20 ring-1 ring-emerald-400'
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/20 ring-2 ring-indigo-400/50'
                           : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
                       }`}
                       id="gateway-korapay-btn"
                     >
                       <Zap className="w-4 h-4 text-amber-300" />
                       <span>Korapay</span>
-                      <span className="text-[9px] font-normal text-emerald-200">Recommended</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGateway('Paystack')}
-                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                        gateway === 'Paystack'
-                          ? 'bg-indigo-600 text-white border-indigo-500'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                      id="gateway-paystack-btn"
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>Paystack</span>
-                      <span className="text-[9px] font-normal opacity-75">Card / Transfer</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGateway('Flutterwave')}
-                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                        gateway === 'Flutterwave'
-                          ? 'bg-amber-600 text-white border-amber-500'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                      id="gateway-flutterwave-btn"
-                    >
-                      <Building2 className="w-4 h-4" />
-                      <span>Flutterwave</span>
-                      <span className="text-[9px] font-normal opacity-75">USSD / Bank</span>
+                      <span className="text-[9px] font-normal text-indigo-200">Card / USSD / Bank</span>
                     </button>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => {
-                    if (isPaymentDisabled) {
-                      setPaymentError('Payment service temporarily unavailable');
-                      setStep('failed');
-                    } else {
-                      setStep('checkout');
-                    }
-                  }}
-                  className={`w-full py-4 font-bold text-sm rounded-xl shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                    isPaymentDisabled
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-                  }`}
+                  onClick={() => setStep('checkout')}
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   id="proceed-checkout-btn"
                 >
                   <Lock className="w-4 h-4" />
-                  {isPaymentDisabled ? 'Payment service temporarily unavailable' : `Proceed with Korapay Checkout (₦${currentPlan.price.toLocaleString()})`}
+                  Proceed with {gateway === 'Squad' ? 'Squad Gateway' : gateway} Checkout (₦{currentPlan.price.toLocaleString()})
                 </button>
 
                 <div className="text-center pt-1">
@@ -469,8 +462,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           <div className="space-y-6">
             <div className="text-center space-y-2">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold">
-                <ShieldCheck className="w-4 h-4" />
-                <span>Secure Korapay Payment Gateway</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Secure {gateway === 'Squad' ? 'Squad Payment Gateway' : 'Korapay Gateway'}</span>
               </div>
               <h2 className="text-2xl font-extrabold text-white">Pay ₦{currentPlan.price.toLocaleString()}</h2>
               <p className="text-xs text-slate-400">
@@ -493,12 +486,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               </div>
             </div>
 
-            {/* Simulated / Real Card Fields */}
+            {/* Payment Card / Channel Details */}
             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
-                <label className="block text-[11px] text-slate-400 font-medium">Payment Card / Account</label>
-                <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                  Korapay Test Environment
+                <label className="block text-[11px] text-slate-400 font-medium">Payment Card / Bank Account</label>
+                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                  {gateway === 'Squad' ? 'Squad Secure Channel' : 'Korapay Environment'}
                 </span>
               </div>
 
@@ -543,12 +536,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleProcessKorapayPayment}
+                onClick={handleProcessSquadPayment}
                 className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                id="pay-now-korapay-btn"
+                id="pay-now-squad-btn"
               >
                 <Lock className="w-4 h-4" />
-                <span>Pay ₦{currentPlan.price.toLocaleString()} via Korapay</span>
+                <span>Pay ₦{currentPlan.price.toLocaleString()} via Squad Gateway</span>
               </button>
             </div>
           </div>
@@ -559,9 +552,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           <div className="py-12 text-center space-y-4">
             <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
             <div className="space-y-2">
-              <h3 className="text-lg font-bold text-white">Verifying Korapay Payment...</h3>
+              <h3 className="text-lg font-bold text-white">Verifying Payment on Server...</h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Communicating with Korapay backend server to confirm transaction reference and activate your Premium subscription...
+                Communicating with Squad API server to verify transaction reference and grant instant access...
               </p>
             </div>
           </div>

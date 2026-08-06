@@ -286,6 +286,8 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         val.proactiveRefresh ||
         val.reloadUserInfo ||
         val.reloadListener ||
+        cName === 'UserImpl' ||
+        cName === 'Y2' ||
         (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
       ) {
         return {
@@ -444,11 +446,17 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
 export function safeStringify(obj: any, indent?: number): string {
   if (obj === undefined) return 'undefined';
   if (obj === null) return 'null';
-  if (typeof obj === 'string') return obj;
 
   try {
     const clean = sanitizeForJSON(obj);
-    if (typeof clean === 'string') return clean;
+    if (typeof clean === 'string') {
+      try {
+        JSON.parse(clean);
+        return clean;
+      } catch {
+        return JSON.stringify(clean);
+      }
+    }
     const seenSet = new WeakSet();
     const result = JSON.stringify(
       clean,
@@ -487,7 +495,7 @@ export function safeStringify(obj: any, indent?: number): string {
   } catch (err) {
     try {
       const stripped = stripNonSerializable(obj);
-      if (typeof stripped === 'string') return stripped;
+      if (typeof stripped === 'string') return JSON.stringify(stripped);
       const seenSet = new WeakSet();
       return (
         JSON.stringify(
@@ -516,7 +524,10 @@ export function safeClone<T>(obj: T): T {
   try {
     const jsonStr = safeStringify(obj);
     if (jsonStr && jsonStr !== 'undefined' && jsonStr !== 'null') {
-      return JSON.parse(jsonStr);
+      const parsed = JSON.parse(jsonStr);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as T;
+      }
     }
     return (Array.isArray(obj) ? [] : {}) as T;
   } catch {

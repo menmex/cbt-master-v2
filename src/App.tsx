@@ -16,6 +16,7 @@ import {
   SystemSettings
 } from './types';
 import { StorageService } from './services/storage';
+import { ApiClient } from './services/apiClient';
 import { recordPracticeActivity } from './utils/streak';
 
 // Components
@@ -167,6 +168,50 @@ export default function App() {
       window.removeEventListener('cbt_storage_change', syncAllData);
     };
   }, []);
+
+  // Payment Redirect Callback Listener (/payment/success and /payment/failed)
+  useEffect(() => {
+    const path = window.location.pathname;
+    const searchParams = new URLSearchParams(window.location.search);
+    const reference = searchParams.get('reference') || searchParams.get('trxref') || searchParams.get('transaction_ref');
+
+    if (path.includes('/payment/success') || (reference && path.includes('/payment'))) {
+      if (reference && currentUser) {
+        setRegistrationMessage("Verifying your Squad payment transaction...");
+        ApiClient.verifySquad({
+          reference,
+          userId: currentUser.id,
+          userEmail: currentUser.email,
+          userName: currentUser.name,
+          userUsername: currentUser.username || '',
+        })
+          .then((res) => {
+            if (res.success) {
+              const refreshedUser = StorageService.getUser();
+              if (refreshedUser) {
+                setCurrentUser(refreshedUser);
+              }
+              setRegistrationMessage("🎉 Squad Payment Verified! Your Premium Subscription is activated.");
+              setActiveTab('dashboard');
+            } else {
+              setRegistrationMessage("⚠️ Payment verification pending or failed: " + (res.error || "Please try again."));
+            }
+          })
+          .catch((err) => {
+            setRegistrationMessage("⚠️ Payment verification error: " + (err.message || "Please contact support."));
+          })
+          .finally(() => {
+            setTimeout(() => setRegistrationMessage(null), 8000);
+            window.history.replaceState({}, document.title, window.location.pathname);
+          });
+      }
+    } else if (path.includes('/payment/failed') || path.includes('/payment/cancel')) {
+      setRegistrationMessage("❌ Squad Payment was cancelled or failed. Your subscription was not activated.");
+      setTimeout(() => setRegistrationMessage(null), 8000);
+      setSubModalOpen(true);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [currentUser]);
 
   // Automatic Navigation Protection & Homepage Determination
   useEffect(() => {

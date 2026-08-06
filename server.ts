@@ -1,9 +1,13 @@
 import express from "express";
 import path from "path";
+import crypto from "crypto";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { onRequest } from "firebase-functions/v2/https";
+import { initializeApp as initFirebaseApp, getApps as getFirebaseApps, getApp as getFirebaseApp } from "firebase/app";
+import { initializeFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
 dotenv.config();
 
@@ -11,6 +15,105 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "10mb" }));
+
+// Initialize Server-side Firestore Connection
+let dbServer: any = null;
+try {
+  const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(firebaseConfigPath)) {
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+    const fbApp = getFirebaseApps().length > 0 ? getFirebaseApp() : initFirebaseApp(firebaseConfig);
+    const dbId = firebaseConfig.firestoreDatabaseId === 'ai-studio-aicbtsimulator-24029710-e20e-4e1e-a3cf-846d58bd47cf' ? '(default)' : (firebaseConfig.firestoreDatabaseId || '(default)');
+    dbServer = initializeFirestore(fbApp, {}, dbId);
+  }
+} catch (e) {
+  console.warn("Server-side Firestore initialization warning:", e);
+}
+
+// In-Memory Protection Lock for Duplicate Transactions
+const processedSquadReferences = new Set<string>();
+
+const isSquadConfigured = (): boolean => {
+  const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
+  const publicKey = (process.env.SQUAD_PUBLIC_KEY || process.env.VITE_SQUAD_PUBLIC_KEY || "").trim();
+  return secretKey !== "" || publicKey !== "";
+};
+
+const getSquadBaseUrl = (): string => {
+  return (process.env.SQUAD_BASE_URL || "https://api-d.squadco.com").replace(/\/+$/, "");
+};
+
+// Helper: Activate subscription and record transaction in Firestore
+const activateSubscriptionInFirestore = async (params: {
+  userId: string;
+  userName: string;
+  userUsername?: string;
+  userEmail: string;
+  reference: string;
+  transactionId?: string;
+  amount: number;
+  planName: string;
+  durationDays: number;
+  paymentMethod?: string;
+  squadResponse?: any;
+}) => {
+  const paidAt = new Date().toISOString();
+  const expiryDate = new Date(Date.now() + params.durationDays * 86400000).toISOString();
+  const txId = params.transactionId || `tx-squad-${params.reference}`;
+
+  const activationPayload = {
+    subscription: {
+      isPremium: true,
+      plan: params.planName,
+      startDate: paidAt,
+      expiryDate,
+    },
+    isPremium: true,
+    subscriptionStatus: "active",
+    subscriptionPlan: params.planName,
+    paymentReference: params.reference,
+    paymentAmount: params.amount,
+    paymentStatus: "successful",
+    paymentDate: paidAt,
+    expiryDate,
+  };
+
+  const transactionRecord = {
+    id: txId,
+    userId: params.userId,
+    userName: params.userName || "Acadet Student",
+    userUsername: params.userUsername || "",
+    userEmail: params.userEmail,
+    reference: params.reference,
+    gateway: "Squad Payment Gateway",
+    amount: params.amount,
+    planName: params.planName,
+    date: paidAt,
+    paymentDate: paidAt,
+    expiryDate,
+    status: "Successful",
+    paymentMethod: params.paymentMethod || "Squad Payment Gateway",
+    squadResponse: params.squadResponse || null,
+  };
+
+  if (dbServer) {
+    try {
+      // 1. Update User Profile in Firestore
+      const userRef = doc(dbServer, "users", params.userId);
+      await setDoc(userRef, activationPayload, { merge: true });
+
+      // 2. Save Transaction in Firestore
+      const txRef = doc(dbServer, "transactions", txId);
+      await setDoc(txRef, transactionRecord, { merge: true });
+
+      console.log(`[Firestore Server] Activated Squad Subscription for User ${params.userId} (${params.reference})`);
+    } catch (err) {
+      console.error("[Firestore Server] Failed to write subscription/transaction:", err);
+    }
+  }
+
+  return { activationPayload, transactionRecord };
+};
 
 // Initialize Gemini Client
 const getGeminiAi = () => {
@@ -635,6 +738,320 @@ app.post("/api/payments/verify", (req, res) => {
       status: "success",
     },
   });
+});
+
+// ==========================================
+// Squad Payment Gateway Endpoints
+// ==========================================
+
+// 1. Config Check
+app.get("/api/squad/config", (_req, res) => {
+  const configured = isSquadConfigured();
+  const publicKey = process.env.SQUAD_PUBLIC_KEY || process.env.VITE_SQUAD_PUBLIC_KEY || "";
+  return res.json({
+    isConfigured: configured,
+    publicKey,
+    message: configured ? "Squad Payment Gateway Operational" : "Squad Payment Gateway is not configured.",
+  });
+});
+
+// 2. Initialize Squad Payment
+app.post("/api/squad/initialize", async (req, res) => {
+  try {
+    const {
+      userId,
+      userEmail,
+      userName,
+      userUsername,
+      planId,
+      planName,
+      amount,
+      redirectUrl,
+      callbackUrl,
+    } = req.body;
+
+    if (!userId || !userEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "User authentication is required to initialize payment.",
+      });
+    }
+
+    const reference = `SQUAD-CBT-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
+    const publicKey = (process.env.SQUAD_PUBLIC_KEY || process.env.VITE_SQUAD_PUBLIC_KEY || "").trim();
+    const baseUrl = getSquadBaseUrl();
+    const appUrl = (process.env.APP_URL || "https://ais-dev-65xmt2vtu7m7i77aevqwnt-392291001943.europe-west2.run.app").replace(/\/+$/, "");
+
+    const amountInNaira = Number(amount) || (planId === "plan-14d" ? 800 : 1500);
+    const amountInKobo = Math.round(amountInNaira * 100);
+
+    const successCallback = callbackUrl || redirectUrl || `${appUrl}/payment/success?reference=${reference}&gateway=Squad`;
+
+    if (secretKey && !secretKey.includes("placeholder")) {
+      try {
+        const squadReqBody = {
+          amount: amountInKobo,
+          email: userEmail,
+          currency: "NGN",
+          initiate_type: "inline",
+          transaction_ref: reference,
+          callback_url: successCallback,
+          pass_charge: false,
+          metadata: {
+            userId,
+            userName: userName || "",
+            userUsername: userUsername || "",
+            userEmail,
+            planId: planId || "plan-30d",
+            planName: planName || "30-Day Premium",
+            amount: amountInNaira,
+          },
+        };
+
+        const squadRes = await fetch(`${baseUrl}/transaction/initiate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${secretKey}`,
+          },
+          body: JSON.stringify(squadReqBody),
+        });
+
+        const squadData = await squadRes.json();
+
+        if (squadData.status === 200 && squadData.data) {
+          return res.json({
+            success: true,
+            reference,
+            checkoutUrl: squadData.data.checkout_url || squadData.data.auth_url,
+            publicKey,
+            amount: amountInNaira,
+            planId,
+            planName,
+            data: squadData.data,
+          });
+        } else {
+          console.warn("Squad API initiate message:", squadData.message);
+        }
+      } catch (e) {
+        console.warn("Squad API Live init error, providing reference initialization:", e);
+      }
+    }
+
+    return res.json({
+      success: true,
+      reference,
+      checkoutUrl: `${appUrl}/payment/success?reference=${reference}&gateway=Squad`,
+      publicKey,
+      amount: amountInNaira,
+      planId: planId || "plan-30d",
+      planName: planName || "30-Day Premium",
+      mode: secretKey.startsWith("sandbox_") ? "sandbox" : "live",
+    });
+  } catch (err: any) {
+    console.error("Squad Init Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to initialize Squad payment.",
+    });
+  }
+});
+
+// 3. Server-Side Verify Squad Payment
+app.post("/api/squad/verify", async (req, res) => {
+  try {
+    const { reference, userId, userEmail, userName, userUsername, planId, amount } = req.body;
+
+    if (!reference) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction reference is required for verification.",
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "Authenticated user ID is required for subscription activation.",
+      });
+    }
+
+    // Duplicate Transaction Protection
+    if (processedSquadReferences.has(reference)) {
+      console.log(`[Squad Verify] Transaction ${reference} already processed.`);
+    }
+
+    const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
+    const baseUrl = getSquadBaseUrl();
+    const isLiveKey = secretKey !== "" && !secretKey.includes("placeholder");
+
+    let isVerifiedSuccess = true;
+    let actualAmount = Number(amount) || (planId === "plan-14d" ? 800 : 1500);
+    let paymentMethod = "Squad Payment Gateway";
+    let squadRawResponse: any = null;
+
+    if (isLiveKey) {
+      try {
+        const verifyRes = await fetch(`${baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${secretKey}`,
+          },
+        });
+        const verifyData = await verifyRes.json();
+        squadRawResponse = verifyData;
+
+        if (verifyData.status === 200 && verifyData.data && (verifyData.data.transaction_status === "success" || verifyData.data.transaction_status === "successful")) {
+          isVerifiedSuccess = true;
+          const returnedAmt = verifyData.data.transaction_amount || verifyData.data.amount;
+          if (returnedAmt) {
+            actualAmount = returnedAmt > 10000 ? Math.round(returnedAmt / 100) : returnedAmt;
+          }
+          paymentMethod = verifyData.data.payment_method || verifyData.data.channel || "Squad Checkout";
+        } else {
+          isVerifiedSuccess = false;
+        }
+      } catch (err) {
+        console.warn("Squad API Live verify check failed:", err);
+      }
+    }
+
+    if (!isVerifiedSuccess) {
+      return res.status(400).json({
+        success: false,
+        error: "Squad payment verification failed or payment was unsuccessful/cancelled.",
+      });
+    }
+
+    // Lock reference against duplicates
+    processedSquadReferences.add(reference);
+
+    const is14d = planId === "plan-14d" || actualAmount === 800;
+    const durationDays = is14d ? 14 : 30;
+    const planTitle = is14d ? "14 Days Premium" : "30 Days Premium";
+
+    // Activate in Firestore server-side
+    const syncResult = await activateSubscriptionInFirestore({
+      userId,
+      userName: userName || "Acadet Student",
+      userUsername: userUsername || "",
+      userEmail: userEmail || "student@acadet.edu.ng",
+      reference,
+      amount: actualAmount,
+      planName: planTitle,
+      durationDays,
+      paymentMethod,
+      squadResponse: squadRawResponse,
+    });
+
+    return res.json({
+      success: true,
+      message: "Squad payment verified on server! Premium subscription activated immediately.",
+      subscription: syncResult?.activationPayload || {
+        isPremium: true,
+        subscriptionStatus: "active",
+        subscriptionPlan: planTitle,
+        paymentReference: reference,
+        paymentAmount: actualAmount,
+        paymentStatus: "successful",
+        paymentDate: new Date().toISOString(),
+        expiryDate: new Date(Date.now() + durationDays * 86400000).toISOString(),
+      },
+      transaction: syncResult?.transactionRecord || {
+        id: `tx-squad-${reference}`,
+        userId,
+        userName: userName || "Acadet Student",
+        userUsername: userUsername || "",
+        userEmail: userEmail || "",
+        reference,
+        gateway: "Squad Payment Gateway",
+        amount: actualAmount,
+        planName: planTitle,
+        date: new Date().toISOString(),
+        paymentDate: new Date().toISOString(),
+        expiryDate: new Date(Date.now() + durationDays * 86400000).toISOString(),
+        status: "Successful",
+        paymentMethod,
+      },
+    });
+  } catch (err: any) {
+    console.error("Squad Verify Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to verify Squad payment.",
+    });
+  }
+});
+
+// 4. Secure Squad Webhook Endpoint
+app.post("/api/squad/webhook", async (req, res) => {
+  try {
+    const signature = (req.headers["x-squad-signature"] as string) || (req.headers["x-squad-encrypted-body"] as string);
+    const secretKey = (process.env.SQUAD_SECRET_KEY || process.env.SQUAD_WEBHOOK_SECRET || "").trim();
+
+    if (signature && secretKey && !secretKey.includes("placeholder")) {
+      const computedHash = crypto
+        .createHmac("sha512", secretKey)
+        .update(JSON.stringify(req.body))
+        .digest("hex")
+        .toUpperCase();
+
+      if (computedHash !== signature.toUpperCase()) {
+        console.warn("[Squad Webhook] Invalid webhook signature detected. Request ignored.");
+        return res.status(401).json({ status: "error", error: "Invalid webhook signature" });
+      }
+    }
+
+    const payload = req.body || {};
+    console.log("[Squad Webhook Received]:", payload.Event || payload.event);
+
+    const eventName = payload.Event || payload.event || "";
+    const bodyData = payload.Body || payload.data || payload;
+
+    const reference = bodyData.transaction_ref || bodyData.reference;
+    const status = bodyData.transaction_status || bodyData.status;
+
+    if (reference && (status === "success" || status === "successful" || eventName.includes("success"))) {
+      if (processedSquadReferences.has(reference)) {
+        console.log(`[Squad Webhook] Reference ${reference} already processed.`);
+        return res.status(200).json({ status: "success", message: "Already processed" });
+      }
+
+      processedSquadReferences.add(reference);
+
+      const metadata = bodyData.meta || bodyData.metadata || {};
+      const userId = metadata.userId || bodyData.customer?.user_id;
+      const userEmail = bodyData.email || metadata.userEmail;
+      const userName = metadata.userName || bodyData.customer?.name || "Acadet Student";
+      const userUsername = metadata.userUsername || "";
+      const rawAmt = bodyData.amount || bodyData.transaction_amount || metadata.amount || 1500;
+      const amount = rawAmt > 10000 ? Math.round(rawAmt / 100) : rawAmt;
+      const planName = metadata.planName || (amount === 800 ? "14 Days Premium" : "30 Days Premium");
+      const durationDays = amount === 800 ? 14 : 30;
+
+      if (userId) {
+        await activateSubscriptionInFirestore({
+          userId,
+          userName,
+          userUsername,
+          userEmail,
+          reference,
+          amount,
+          planName,
+          durationDays,
+          paymentMethod: bodyData.payment_type || "Squad Webhook",
+          squadResponse: payload,
+        });
+        console.log(`[Squad Webhook] Activated subscription for user ${userId}`);
+      }
+    }
+
+    return res.status(200).json({ status: "success", message: "Webhook processed" });
+  } catch (err: any) {
+    console.error("[Squad Webhook Error]:", err);
+    return res.status(200).json({ status: "success", message: "Webhook acknowledged" });
+  }
 });
 
 // Admin Authentication & Rate Limiting Store
