@@ -26,7 +26,16 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   if (res.ok && contentType.includes('application/json')) {
     return (await res.json()) as T;
   }
-  throw new Error(`Server endpoint ${endpoint} unavailable (status ${res.status}, content ${contentType})`);
+  let serverErrMsg = '';
+  try {
+    if (contentType.includes('application/json')) {
+      const jsonErr = await res.json();
+      if (jsonErr && (jsonErr.error || jsonErr.message)) {
+        serverErrMsg = jsonErr.error || jsonErr.message;
+      }
+    }
+  } catch {}
+  throw new Error(serverErrMsg || `Server endpoint ${endpoint} unavailable (status ${res.status})`);
 }
 
 export const ApiClient = {
@@ -274,7 +283,7 @@ Return JSON format with:
     }
   },
 
-  // 5. Squad Payment Gateway Integration
+  // Squad Payment Gateway Integration
   async getSquadConfig(): Promise<any> {
     try {
       return await fetchApi<any>('/api/squad/config');
@@ -286,6 +295,32 @@ Return JSON format with:
     }
   },
 
+  async createPaymentLink(payload: { planId: string; amount?: number; email: string; userId: string; userName?: string }): Promise<any> {
+    try {
+      const res = await fetchApi<any>('/api/create-payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeStringify(payload),
+      });
+      return res;
+    } catch (err: any) {
+      return this.initializeSquad(payload);
+    }
+  },
+
+  async verifyPayment(payload: { reference: string; userId?: string; email?: string; planId?: string }): Promise<any> {
+    try {
+      const res = await fetchApi<any>('/api/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: safeStringify(payload),
+      });
+      return res;
+    } catch (err: any) {
+      return this.verifySquad(payload);
+    }
+  },
+
   async initializeSquad(payload: any): Promise<any> {
     try {
       const res = await fetchApi<any>('/api/squad/initialize', {
@@ -294,16 +329,10 @@ Return JSON format with:
         body: safeStringify(payload),
       });
       return res;
-    } catch (err) {
-      const reference = `SQUAD-CBT-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    } catch (err: any) {
       return {
-        success: true,
-        reference,
-        checkoutUrl: `/payment/success?reference=${reference}&gateway=Squad`,
-        amount: payload.amount || 1500,
-        planId: payload.planId || 'plan-30d',
-        planName: payload.planName || '30-Day Premium',
-        mode: 'sandbox',
+        success: false,
+        error: err?.message || 'Failed to initialize Squad payment. Please check network connection or Squad credentials.',
       };
     }
   },
@@ -316,149 +345,24 @@ Return JSON format with:
         body: safeStringify(payload),
       });
       return res;
-    } catch (err) {
-      const { reference, userId, userEmail, userName, userUsername, planId, amount } = payload;
-      const is14d = planId === 'plan-14d' || Number(amount) === 800;
-      const durationDays = is14d ? 14 : 30;
-      const planTitle = is14d ? '14 Days Premium' : '30 Days Premium';
-      const actualAmount = Number(amount) || (is14d ? 800 : 1500);
-      const expiryDate = new Date(Date.now() + durationDays * 86400000).toISOString();
-      const paidAt = new Date().toISOString();
-
+    } catch (err: any) {
       return {
-        success: true,
-        message: 'Squad payment verified on server! Premium subscription activated.',
-        subscription: {
-          isPremium: true,
-          subscriptionStatus: 'active',
-          subscriptionPlan: planTitle,
-          paymentReference: reference || `SQUAD-${Date.now()}`,
-          paymentAmount: actualAmount,
-          paymentStatus: 'successful',
-          paymentDate: paidAt,
-          expiryDate,
-        },
-        transaction: {
-          id: `tx-squad-${reference || Date.now()}`,
-          userId: userId || 'user-id',
-          userName: userName || 'Acadet Student',
-          userUsername: userUsername || '',
-          userEmail: userEmail || 'student@acadet.edu.ng',
-          reference: reference || `SQUAD-${Date.now()}`,
-          gateway: 'Squad Payment Gateway',
-          amount: actualAmount,
-          planName: planTitle,
-          date: paidAt,
-          paymentDate: paidAt,
-          expiryDate,
-          status: 'Successful',
-          paymentMethod: 'Squad Payment Gateway',
-        },
+        success: false,
+        error: err?.message || 'Squad payment verification failed.',
       };
     }
   },
 
-  // Korapay Payment Gateway Integration
   async getKorapayConfig(): Promise<any> {
-    try {
-      return await fetchApi<any>('/api/korapay/config');
-    } catch {
-      const meta = import.meta as any;
-      const pubKey = (meta?.env?.VITE_KORAPAY_PUBLIC_KEY || '').trim();
-      const isConfigured = pubKey !== '' && !pubKey.includes('placeholder') && !pubKey.includes('MY_');
-      return { isConfigured, message: isConfigured ? 'Operational' : 'Payment service temporarily unavailable' };
-    }
+    return { isConfigured: false, message: 'Payment gateways disabled.' };
   },
 
-  async initializeKorapay(payload: any): Promise<any> {
-    try {
-      const res = await fetchApi<any>('/api/korapay/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify(payload),
-      });
-      return res;
-    } catch (err) {
-      const meta = import.meta as any;
-      const pubKey = (meta?.env?.VITE_KORAPAY_PUBLIC_KEY || '').trim();
-      const hasKeys = pubKey !== '' && !pubKey.includes('placeholder') && !pubKey.includes('MY_');
-
-      if (!hasKeys) {
-        return {
-          success: false,
-          error: 'Payment service temporarily unavailable',
-          isPaymentDisabled: true,
-        };
-      }
-
-      const reference = `KORA-CBT-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-      return {
-        success: true,
-        reference,
-        amount: payload.amount || 1500,
-        planId: payload.planId || 'plan-30d',
-        planName: payload.planName || '30-Day Premium',
-        mode: 'test',
-      };
-    }
+  async initializeKorapay(): Promise<any> {
+    return { success: false, error: 'Payment gateways have been removed.' };
   },
 
-  async verifyKorapay(payload: any): Promise<any> {
-    try {
-      const res = await fetchApi<any>('/api/korapay/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify(payload),
-      });
-      return res;
-    } catch (err) {
-      const meta = import.meta as any;
-      const pubKey = (meta?.env?.VITE_KORAPAY_PUBLIC_KEY || '').trim();
-      const hasKeys = pubKey !== '' && !pubKey.includes('placeholder') && !pubKey.includes('MY_');
-
-      if (!hasKeys) {
-        return {
-          success: false,
-          error: 'Payment service temporarily unavailable',
-          isPaymentDisabled: true,
-        };
-      }
-
-      const { reference, userId, planId, amount, gateway = 'Korapay' } = payload;
-      const is14d = planId === 'plan-14d' || Number(amount) === 800;
-      const durationDays = is14d ? 14 : 30;
-      const planTitle = is14d ? '14 Days Premium' : '30 Days Premium';
-      const actualAmount = Number(amount) || (is14d ? 800 : 1500);
-      const expiryDate = new Date(Date.now() + durationDays * 86400000).toISOString();
-      const paidAt = new Date().toISOString();
-
-      return {
-        success: true,
-        message: 'Payment verified successfully! Premium subscription activated.',
-        subscription: {
-          isPremium: true,
-          subscriptionStatus: 'active',
-          subscriptionPlan: planTitle,
-          paymentReference: reference || `KORA-${Date.now()}`,
-          paymentAmount: actualAmount,
-          paymentStatus: 'successful',
-          paymentDate: paidAt,
-          expiryDate,
-        },
-        transaction: {
-          id: `tx-${Date.now()}`,
-          userId: userId || 'usr-student-1',
-          reference: reference || `KORA-${Date.now()}`,
-          gateway: gateway || 'Korapay',
-          amount: actualAmount,
-          planName: planTitle,
-          date: paidAt,
-          expiryDate,
-          status: 'Successful',
-          paymentMethod: 'Korapay Checkout',
-        },
-      };
-    }
+  async verifyKorapay(): Promise<any> {
+    return { success: false, error: 'Payment gateways have been removed.' };
   },
 
   // 6. Admin Authentication

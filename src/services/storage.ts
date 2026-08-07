@@ -279,7 +279,7 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
       isCircularSdkObject = true;
     }
 
-    // 2. Firebase Auth User
+    // 2. Firebase Auth User or User-like objects
     try {
       if (
         val.stsTokenManager ||
@@ -288,15 +288,17 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         val.reloadListener ||
         cName === 'UserImpl' ||
         cName === 'Y2' ||
-        (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData))
+        (typeof val.uid === 'string' && (val.auth || val._delegate || val.providerData || val.stsTokenManager || val.email))
       ) {
-        return {
-          id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
-          uid: typeof val.uid === 'string' ? val.uid : undefined,
-          email: typeof val.email === 'string' ? val.email : undefined,
-          displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
-          photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
-        };
+        if (typeof val.uid === 'string' || typeof val.email === 'string') {
+          return {
+            id: typeof val.id === 'string' || typeof val.id === 'number' ? String(val.id) : (typeof val.uid === 'string' ? val.uid : undefined),
+            uid: typeof val.uid === 'string' ? val.uid : undefined,
+            email: typeof val.email === 'string' ? val.email : undefined,
+            displayName: typeof val.displayName === 'string' ? val.displayName : (typeof val.name === 'string' ? val.name : undefined),
+            photoURL: typeof val.photoURL === 'string' ? val.photoURL : undefined,
+          };
+        }
       }
     } catch {
       // ignore
@@ -418,6 +420,9 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
         k === 'proactiveRefresh' ||
         k === 'reloadUserInfo' ||
         k === 'reloadListener' ||
+        k === 'i' ||
+        k === 'src' ||
+        k === '_delegate' ||
         k.startsWith('_') ||
         k.startsWith('$$')
       ) {
@@ -492,27 +497,18 @@ export function safeStringify(obj: any, indent?: number): string {
       indent
     );
     return result !== undefined ? result : 'null';
-  } catch (err) {
+  } catch {
     try {
       const stripped = stripNonSerializable(obj);
-      if (typeof stripped === 'string') return JSON.stringify(stripped);
-      const seenSet = new WeakSet();
-      return (
-        JSON.stringify(
-          stripped,
-          (key, value) => {
-            if (key === 'toJSON') return undefined;
-            if (typeof value === 'object' && value !== null) {
-              if (seenSet.has(value)) return '[Circular]';
-              try {
-                seenSet.add(value);
-              } catch {}
-            }
-            return typeof value === 'function' || typeof value === 'symbol' ? undefined : value;
-          },
-          indent
-        ) || '{}'
-      );
+      if (typeof stripped === 'string') {
+        try {
+          JSON.parse(stripped);
+          return stripped;
+        } catch {
+          return JSON.stringify(stripped);
+        }
+      }
+      return JSON.stringify(stripped, (k, v) => (k === 'toJSON' ? undefined : v)) || '{}';
     } catch {
       return '{}';
     }
@@ -1721,13 +1717,52 @@ export class StorageService {
 
   static saveTransaction(tx: PaymentTransaction): void {
     const list = this.getTransactions();
-    const idx = list.findIndex((t) => t.id === tx.id);
+    const idx = list.findIndex((t) => t.id === tx.id || (t.reference && t.reference === tx.reference));
     if (idx >= 0) {
       list[idx] = tx;
     } else {
       list.unshift(tx);
     }
     this.saveTransactions(list);
+
+    // Sync payments and subscriptions collections in Firestore
+    try {
+      const statusStr = String(tx.status || '').toLowerCase();
+      const isSuccess = statusStr === 'successful' || statusStr === 'success';
+      const isFailed = statusStr === 'failed';
+
+      if (tx.reference) {
+        setDoc(
+          doc(db, 'payments', tx.reference),
+          safeClone({
+            paymentId: tx.paymentId || tx.id || tx.reference,
+            userId: tx.userId,
+            amount: tx.amount,
+            reference: tx.reference,
+            status: isSuccess ? 'success' : isFailed ? 'failed' : 'pending',
+            createdAt: tx.date || new Date().toISOString(),
+            verifiedAt: isSuccess ? (tx.paymentDate || new Date().toISOString()) : null,
+          }),
+          { merge: true }
+        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `payments/${tx.reference}`));
+      }
+
+      if (isSuccess && tx.userId) {
+        setDoc(
+          doc(db, 'subscriptions', tx.userId),
+          safeClone({
+            userId: tx.userId,
+            plan: tx.planName,
+            startDate: tx.paymentDate || new Date().toISOString(),
+            expiryDate: tx.expiryDate || new Date(Date.now() + 30 * 86400000).toISOString(),
+            status: 'active',
+          }),
+          { merge: true }
+        ).catch((err) => handleFirestoreError(err, OperationType.WRITE, `subscriptions/${tx.userId}`));
+      }
+    } catch (e) {
+      console.warn('Firestore payment/subscription write error:', e);
+    }
   }
 
   // Ranking History

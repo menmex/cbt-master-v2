@@ -169,49 +169,13 @@ export default function App() {
     };
   }, []);
 
-  // Payment Redirect Callback Listener (/payment/success and /payment/failed)
+  // Clean up legacy payment URL parameters if present
   useEffect(() => {
     const path = window.location.pathname;
-    const searchParams = new URLSearchParams(window.location.search);
-    const reference = searchParams.get('reference') || searchParams.get('trxref') || searchParams.get('transaction_ref');
-
-    if (path.includes('/payment/success') || (reference && path.includes('/payment'))) {
-      if (reference && currentUser) {
-        setRegistrationMessage("Verifying your Squad payment transaction...");
-        ApiClient.verifySquad({
-          reference,
-          userId: currentUser.id,
-          userEmail: currentUser.email,
-          userName: currentUser.name,
-          userUsername: currentUser.username || '',
-        })
-          .then((res) => {
-            if (res.success) {
-              const refreshedUser = StorageService.getUser();
-              if (refreshedUser) {
-                setCurrentUser(refreshedUser);
-              }
-              setRegistrationMessage("🎉 Squad Payment Verified! Your Premium Subscription is activated.");
-              setActiveTab('dashboard');
-            } else {
-              setRegistrationMessage("⚠️ Payment verification pending or failed: " + (res.error || "Please try again."));
-            }
-          })
-          .catch((err) => {
-            setRegistrationMessage("⚠️ Payment verification error: " + (err.message || "Please contact support."));
-          })
-          .finally(() => {
-            setTimeout(() => setRegistrationMessage(null), 8000);
-            window.history.replaceState({}, document.title, window.location.pathname);
-          });
-      }
-    } else if (path.includes('/payment/failed') || path.includes('/payment/cancel')) {
-      setRegistrationMessage("❌ Squad Payment was cancelled or failed. Your subscription was not activated.");
-      setTimeout(() => setRegistrationMessage(null), 8000);
-      setSubModalOpen(true);
-      window.history.replaceState({}, document.title, window.location.pathname);
+    if (path.includes('/payment')) {
+      window.history.replaceState({}, document.title, '/');
     }
-  }, [currentUser]);
+  }, []);
 
   // Automatic Navigation Protection & Homepage Determination
   useEffect(() => {

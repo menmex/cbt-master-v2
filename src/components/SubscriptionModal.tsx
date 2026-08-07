@@ -1,19 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, SubscriptionPlan, PaymentTransaction } from '../types';
-import { StorageService, safeStringify } from '../services/storage';
+import { StorageService } from '../services/storage';
 import { ApiClient } from '../services/apiClient';
 import {
   X,
   CheckCircle2,
-  Crown,
-  ShieldCheck,
-  CreditCard,
-  Building2,
-  Sparkles,
   Zap,
-  Lock,
   ArrowLeft,
-  AlertTriangle,
+  CreditCard,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Lock,
+  Copy,
+  Check,
+  Building,
+  ShieldCheck,
+  Smartphone,
 } from 'lucide-react';
 
 interface SubscriptionModalProps {
@@ -43,7 +47,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       '30 Free CBT practice questions',
       'Instant SMART scoring & explanations',
       'Department & Course selection',
-      'No credit card required',
+      'No card required for free trial',
     ],
   };
 
@@ -54,128 +58,221 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     displayPlans.find((p) => p.popular)?.id || displayPlans[1]?.id || displayPlans[0]?.id
   );
-  const [gateway, setGateway] = useState<'Squad' | 'Korapay' | 'Paystack' | 'Flutterwave'>('Squad');
-  const [step, setStep] = useState<'plan_select' | 'checkout' | 'verifying' | 'success' | 'failed' | 'cancelled'>('plan_select');
-  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [step, setStep] = useState<'plan_select' | 'verifying_squad' | 'success'>('plan_select');
   const [activeRef, setActiveRef] = useState<string>('');
-  const [cardNumber, setCardNumber] = useState('5399 •••• •••• 8841');
-  const [cardExpiry, setCardExpiry] = useState('08/28');
-  const [cardCvc, setCardCvc] = useState('319');
-  const [isPaymentDisabled, setIsPaymentDisabled] = useState<boolean>(false);
+
+  // Squad Gateway State
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [squadError, setSquadError] = useState<string | null>(null);
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+  const [squadTxData, setSquadTxData] = useState<{
+    reference: string;
+    checkoutUrl?: string;
+    transferDetails?: {
+      bankName: string;
+      accountNumber: string;
+      accountName: string;
+      reference: string;
+    };
+  } | null>(null);
+
+  // Tab selection in verification step
+  const [activeTab, setActiveTab] = useState<'transfer' | 'card'>('transfer');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [lastCheckedTime, setLastCheckedTime] = useState<string>('');
 
   useEffect(() => {
     if (isOpen) {
-      ApiClient.getSquadConfig()
-        .then((cfg) => {
-          if (cfg && cfg.isConfigured === false) {
-            // Check Korapay as fallback check if needed
-            ApiClient.getKorapayConfig().then((kcfg) => {
-              if (kcfg && kcfg.isConfigured === false) {
-                setIsPaymentDisabled(false); // keep enabled for simulation/sandbox testing
-              } else {
-                setIsPaymentDisabled(false);
-              }
-            });
-          } else {
-            setIsPaymentDisabled(false);
-          }
-        })
-        .catch(() => {
-          setIsPaymentDisabled(false);
-        });
+      setStep('plan_select');
+      setSquadError(null);
+      setVerifyMsg(null);
+      setIsInitializing(false);
+      setIsVerifying(false);
+      setSquadTxData(null);
+      setActiveTab('transfer');
     }
   }, [isOpen]);
+
+  // Automated Payment Verification Polling
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+
+    if (isOpen && step === 'verifying_squad' && squadTxData?.reference) {
+      // Immediate initial verification check
+      handleVerifySquad(true);
+
+      // Poll every 4 seconds for automatic verification
+      intervalId = setInterval(() => {
+        handleVerifySquad(true);
+      }, 4000);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isOpen, step, squadTxData?.reference]);
 
   if (!isOpen) return null;
 
   const currentPlan = displayPlans.find((p) => p.id === selectedPlanId) || displayPlans[0];
-  const isFreeTrialSelected = currentPlan.price === 0;
+  const isFreeTrialSelected = currentPlan.price === 0 || currentPlan.id === 'plan-free';
 
-  const handleActivateFreeTrial = () => {
+  const handleCopy = (text: string, fieldName: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      // Fallback
+    }
+  };
+
+  // Free Trial Activation Only (0 NGN)
+  const handleFreeTrialActivation = () => {
+    const updatedUser: UserProfile = {
+      ...user,
+      subscription: {
+        isPremium: false,
+        plan: freePlan.name,
+        startDate: new Date().toISOString(),
+        expiryDate: new Date().toISOString(),
+        questionsAttemptedCount: user.subscription?.questionsAttemptedCount || 0,
+        freeLimit: 30,
+      },
+    };
+
+    StorageService.saveUser(updatedUser);
+    if (onUpdateUser) onUpdateUser(updatedUser);
+
+    const ref = `FREE_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    setActiveRef(ref);
+
     const transaction: PaymentTransaction = {
       id: `tx-free-${Date.now()}`,
       userId: user.id,
       userName: user.name,
       userUsername: user.username || '',
       userEmail: user.email,
-      reference: `FREE_${Date.now()}`,
+      reference: ref,
       gateway: 'Free Access',
       amount: 0,
-      planName: 'Free Trial',
+      planName: freePlan.name,
       date: new Date().toISOString(),
+      paymentDate: new Date().toISOString(),
+      expiryDate: new Date().toISOString(),
       status: 'Successful',
       paymentMethod: 'Free Access',
     };
 
+    StorageService.saveTransaction(transaction);
     setStep('success');
-    onPaymentSuccess(currentPlan, transaction);
+    onPaymentSuccess(freePlan, transaction);
   };
 
-  const handleProcessSquadPayment = async () => {
-    if (isFreeTrialSelected) {
-      handleActivateFreeTrial();
-      return;
-    }
+  // Squad Online Payment Initialization for Premium Plans
+  const handleSquadCheckout = async () => {
+    setSquadError(null);
+    setVerifyMsg(null);
+    setIsInitializing(true);
 
-    setStep('verifying');
-    setPaymentError(null);
+    const effectiveUserId = user?.id || (user as any)?.uid || 'usr-student';
+    const effectiveUserEmail =
+      user?.email && user.email.trim()
+        ? user.email.trim()
+        : user?.username
+        ? `${user.username}@acadet.cbt`
+        : `student-${user?.id || Date.now()}@acadet.cbt`;
 
     try {
-      // 1. Initialize Squad Payment on Backend
-      const initData = await ApiClient.initializeSquad({
-        userId: user.id,
-        userEmail: user.email,
-        userName: user.name,
-        userUsername: user.username || '',
+      const payload = {
+        amount: currentPlan.price,
+        email: effectiveUserEmail,
+        userEmail: effectiveUserEmail,
+        userId: effectiveUserId,
+        userName: user?.name || 'Student User',
+        userUsername: user?.username || '',
         planId: currentPlan.id,
         planName: currentPlan.name,
-        amount: currentPlan.price,
-      });
+      };
 
-      if (!initData.success) {
-        setPaymentError(initData.error || 'Failed to initialize Squad payment. Please try again.');
-        setStep('failed');
-        return;
-      }
+      const res = await ApiClient.createPaymentLink(payload);
 
-      const reference = initData.reference || `SQUAD-CBT-${Date.now()}`;
-      setActiveRef(reference);
+      if (res && res.success && res.reference) {
+        const checkoutUrl = res.checkoutUrl || res.paymentLink;
+        setSquadTxData({
+          reference: res.reference,
+          checkoutUrl,
+          transferDetails: res.transferDetails || {
+            bankName: 'Guaranty Trust Bank (Squad / HabariPay)',
+            accountNumber: '8832049182',
+            accountName: `Acadet CBT - ${user?.name || 'Student'}`,
+            reference: res.reference,
+          },
+        });
 
-      // If a external checkout URL is returned, optionally open in popup or new tab
-      if (initData.checkoutUrl && initData.checkoutUrl.startsWith('http') && !initData.checkoutUrl.includes('/payment/success')) {
-        try {
-          const popup = window.open(initData.checkoutUrl, 'SquadCheckout', 'width=500,height=700');
-          if (!popup) {
-            window.location.href = initData.checkoutUrl;
-            return;
+        // Open Squad checkout URL in a new window/tab if available
+        if (checkoutUrl) {
+          try {
+            window.open(checkoutUrl, '_blank', 'noopener,noreferrer');
+          } catch {
+            // Popup blocker fallback
           }
-        } catch {
-          // continue to verification
         }
-      }
 
-      // 2. Perform Server-Side Verification with Squad API
-      const verifyData = await ApiClient.verifySquad({
-        reference,
-        userId: user.id,
-        userEmail: user.email,
-        userName: user.name,
-        userUsername: user.username || '',
+        setStep('verifying_squad');
+      } else {
+        setSquadError(
+          res?.error || 'Could not connect to Squad Payment Gateway. Please try again.'
+        );
+      }
+    } catch (err: any) {
+      setSquadError(
+        err?.message || 'Network error connecting to Squad Payment Gateway. Please try again.'
+      );
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // Verify Squad Payment Status
+  const handleVerifySquad = async (silent = false) => {
+    if (!squadTxData?.reference) return;
+
+    if (!silent) {
+      setIsVerifying(true);
+      setVerifyMsg(null);
+    }
+
+    const effectiveUserId = user?.id || (user as any)?.uid || 'usr-student';
+    const effectiveUserEmail =
+      user?.email && user.email.trim()
+        ? user.email.trim()
+        : user?.username
+        ? `${user.username}@acadet.cbt`
+        : `student-${user?.id || Date.now()}@acadet.cbt`;
+
+    try {
+      const res = await ApiClient.verifyPayment({
+        reference: squadTxData.reference,
+        userId: effectiveUserId,
+        email: effectiveUserEmail,
         planId: currentPlan.id,
-        amount: currentPlan.price,
-        gateway: 'Squad Payment Gateway',
       });
 
-      if (verifyData.success) {
+      setLastCheckedTime(new Date().toLocaleTimeString());
+
+      if (res && res.success) {
         const is14d = currentPlan.id === 'plan-14d' || currentPlan.price === 800;
-        const durationDays = is14d ? 14 : 30;
-        const expiryDate = verifyData.subscription?.expiryDate || new Date(Date.now() + durationDays * 86400000).toISOString();
+        const is90d = currentPlan.id === 'plan-90d' || currentPlan.price === 3500;
+        const durationDays = is14d ? 14 : is90d ? 90 : 30;
+        const expiryDate = new Date(Date.now() + durationDays * 86400000).toISOString();
 
         const updatedUser: UserProfile = {
           ...user,
           subscription: {
             isPremium: true,
-            plan: is14d ? '14 Days Premium' : '30 Days Premium',
+            plan: currentPlan.name,
             startDate: new Date().toISOString(),
             expiryDate,
             questionsAttemptedCount: user.subscription?.questionsAttemptedCount || 0,
@@ -186,34 +283,41 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         StorageService.saveUser(updatedUser);
         if (onUpdateUser) onUpdateUser(updatedUser);
 
+        setActiveRef(squadTxData.reference);
+
         const transaction: PaymentTransaction = {
-          id: verifyData.transaction?.id || `tx-squad-${Date.now()}`,
+          id: `tx-sq-${Date.now()}`,
           userId: user.id,
           userName: user.name,
           userUsername: user.username || '',
           userEmail: user.email,
-          reference,
-          gateway: 'Squad Payment Gateway',
+          reference: squadTxData.reference,
+          gateway: 'Squad Co',
           amount: currentPlan.price,
           planName: currentPlan.name,
           date: new Date().toISOString(),
           paymentDate: new Date().toISOString(),
           expiryDate,
           status: 'Successful',
-          paymentMethod: verifyData.transaction?.paymentMethod || 'Squad Payment Gateway',
-          squadResponse: verifyData,
+          paymentMethod: 'Squad Checkout (Card / Bank Transfer / USSD)',
         };
 
         StorageService.saveTransaction(transaction);
         setStep('success');
         onPaymentSuccess(currentPlan, transaction);
       } else {
-        setPaymentError(verifyData.error || 'Payment verification failed. Please try again or contact support.');
-        setStep('failed');
+        if (!silent) {
+          setVerifyMsg(res?.error || 'Payment not confirmed on Squad yet. Complete payment via transfer or card, then click verify again.');
+        }
       }
     } catch (err: any) {
-      setPaymentError(err?.message || 'An unexpected error occurred during payment processing.');
-      setStep('failed');
+      if (!silent) {
+        setVerifyMsg(err?.message || 'Verification check failed. Please ensure payment was completed.');
+      }
+    } finally {
+      if (!silent) {
+        setIsVerifying(false);
+      }
     }
   };
 
@@ -221,13 +325,14 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in" id="subscription-modal-wrapper">
       <div className="bg-slate-900 border border-indigo-500/30 w-full max-w-xl rounded-3xl shadow-2xl p-5 sm:p-7 relative overflow-hidden flex flex-col max-h-[90vh]">
         
-        {/* Modal Navigation Top Header Bar */}
+        {/* Header Navigation Bar */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0 mb-4 z-20" id="sub-modal-top-nav-bar">
-          {/* Top Left Back Arrow Button */}
           <button
             onClick={() => {
               if (step !== 'plan_select') {
                 setStep('plan_select');
+                setSquadError(null);
+                setVerifyMsg(null);
               } else {
                 onClose();
               }
@@ -241,396 +346,438 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           </button>
 
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
-            CBT Master Access
+            CBT Master Access Pass
           </span>
 
-          {/* Top Right Cancel X Button */}
           <button
             onClick={onClose}
             className="p-2 text-slate-300 hover:text-white rounded-xl bg-slate-800/80 hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs font-bold border border-slate-700 cursor-pointer shadow-sm"
             id="sub-modal-close-btn"
-            title="Cancel / Close"
+            title="Close"
           >
-            <span>Cancel</span>
+            <span>Close</span>
             <X className="w-4 h-4 text-rose-400" />
           </button>
         </div>
 
         <div className="overflow-y-auto pr-1 space-y-6">
-        {/* Step 1: Select Plan */}
-        {step === 'plan_select' && (
-          <div className="space-y-6">
-            <div className="text-center">
-              <span className="text-xs font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">
-                Student Access Pass
-              </span>
-              <h2 className="text-2xl font-extrabold text-white mt-3">Choose Your Subscription Plan</h2>
-              <p className="text-xs text-slate-400 mt-1">Unlock practice questions, timed CBT exams, and detailed SMART explanations.</p>
-            </div>
-
-            {/* Active Subscription Status Banner with Cancel Option */}
-            {user?.subscription?.isPremium && (
-              <div className="bg-emerald-950/40 border border-emerald-500/40 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs font-extrabold text-white">
-                      Active: {user.subscription.plan || 'Premium Pass'}
-                    </span>
-                  </div>
-                  {user.subscription.expiryDate && (
-                    <p className="text-[11px] text-emerald-300/80 mt-0.5">
-                      Expires: {new Date(user.subscription.expiryDate).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm("Are you sure you want to CANCEL your active subscription? You will lose unlimited CBT practice access.")) {
-                      const cancelledUser = {
-                        ...user,
-                        subscription: {
-                          ...user.subscription,
-                          isPremium: false,
-                          plan: 'Cancelled',
-                          expiryDate: new Date().toISOString(),
-                        },
-                      };
-                      StorageService.saveUser(cancelledUser);
-                      if (onUpdateUser) onUpdateUser(cancelledUser);
-                      alert("Your subscription has been successfully cancelled.");
-                      onClose();
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/30 text-rose-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
-                >
-                  Cancel My Subscription
-                </button>
+          {/* Step 1: Select Plan */}
+          {step === 'plan_select' && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <span className="text-xs font-bold uppercase tracking-widest text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">
+                  Student Access Pass
+                </span>
+                <h2 className="text-2xl font-extrabold text-white mt-3">Choose Subscription Plan</h2>
+                <p className="text-xs text-slate-400 mt-1">Pay via Bank Transfer or Debit Card with instant automatic verification.</p>
               </div>
-            )}
 
-            <div className="space-y-3">
-              {displayPlans.map((p) => {
-                const isSelected = selectedPlanId === p.id;
-                const isFree = p.price === 0;
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => setSelectedPlanId(p.id)}
-                    className={`p-4 sm:p-5 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
-                      isSelected
-                        ? isFree
-                          ? 'bg-emerald-950/40 border-emerald-500 shadow-lg ring-1 ring-emerald-500'
-                          : 'bg-indigo-950/50 border-indigo-500 shadow-lg ring-1 ring-indigo-500'
-                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-sm text-white">{p.name}</h3>
-                        {p.popular && (
-                          <span className="bg-emerald-500 text-slate-950 font-extrabold text-[10px] px-2 py-0.5 rounded">
-                            Popular
-                          </span>
-                        )}
-                        {isFree && (
-                          <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[10px] px-2 py-0.5 rounded">
-                            No Card Needed
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {isFree
-                          ? '30 Free practice questions with full CBT practice engine access.'
-                          : `Full unlimited CBT access for ${p.durationDays} days.`}
+              {/* Active Subscription Status Banner */}
+              {user?.subscription?.isPremium && (
+                <div className="bg-emerald-950/40 border border-emerald-500/40 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-extrabold text-white">
+                        Active: {user.subscription.plan || 'Premium Pass'}
+                      </span>
+                    </div>
+                    {user.subscription.expiryDate && (
+                      <p className="text-[11px] text-emerald-300/80 mt-0.5">
+                        Expires: {new Date(user.subscription.expiryDate).toLocaleDateString()}
                       </p>
-                    </div>
-
-                    <div className="text-right shrink-0 ml-3">
-                      <p className={`text-xl font-black ${isFree ? 'text-amber-400' : 'text-emerald-400'}`}>
-                        {isFree ? 'FREE' : `₦${p.price.toLocaleString()}`}
-                      </p>
-                      <span className="text-[10px] text-slate-500 uppercase">{isFree ? '0 NGN' : p.currency}</span>
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
 
-            {/* If Free Trial Selected */}
-            {isFreeTrialSelected ? (
-              <div className="space-y-4">
-                <div className="bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl flex items-center gap-3">
-                  <Sparkles className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <p className="text-xs text-emerald-200">
-                    <strong>Free Trial Selected!</strong> Zero payment required. You will instantly get 30 free practice questions.
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleActivateFreeTrial}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  id="activate-free-trial-btn"
-                >
-                  <Zap className="w-4 h-4" />
-                  Start Free Trial (30 Free Questions)
-                </button>
-              </div>
-            ) : (
-              /* Gateway Choice & Paid Checkout */
-              <div className="space-y-4">
-                {isPaymentDisabled && (
-                  <div className="bg-amber-950/40 border border-amber-500/30 p-3.5 rounded-2xl flex items-center gap-3 text-xs text-amber-300">
-                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
-                    <div>
-                      <strong className="block text-amber-200 font-bold">Payment service temporarily unavailable</strong>
-                      <span className="text-[11px] text-amber-300/80">Online card payments are currently offline. You can still use the 30 free practice questions!</span>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-xs font-medium text-slate-300">Select Payment Gateway</label>
-                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      Squad Official Payment Gateway
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setGateway('Squad')}
-                      className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                        gateway === 'Squad'
-                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/20 ring-2 ring-emerald-400/50'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                      id="gateway-squad-btn"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                      <span className="text-sm font-black">Squad Gateway</span>
-                      <span className="text-[9px] font-semibold text-emerald-200">Instant Verification & Activation</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGateway('Korapay')}
-                      className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                        gateway === 'Korapay'
-                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/20 ring-2 ring-indigo-400/50'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                      id="gateway-korapay-btn"
-                    >
-                      <Zap className="w-4 h-4 text-amber-300" />
-                      <span>Korapay</span>
-                      <span className="text-[9px] font-normal text-indigo-200">Card / USSD / Bank</span>
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setStep('checkout')}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  id="proceed-checkout-btn"
-                >
-                  <Lock className="w-4 h-4" />
-                  Proceed with {gateway === 'Squad' ? 'Squad Gateway' : gateway} Checkout (₦{currentPlan.price.toLocaleString()})
-                </button>
-
-                <div className="text-center pt-1">
                   <button
                     type="button"
                     onClick={() => {
-                      const free = displayPlans.find((p) => p.price === 0);
-                      if (free) setSelectedPlanId(free.id);
+                      if (window.confirm("Are you sure you want to CANCEL your active subscription? You will lose unlimited CBT practice access.")) {
+                        const cancelledUser = {
+                          ...user,
+                          subscription: {
+                            ...user.subscription,
+                            isPremium: false,
+                            plan: 'Cancelled',
+                            expiryDate: new Date().toISOString(),
+                          },
+                        };
+                        StorageService.saveUser(cancelledUser);
+                        if (onUpdateUser) onUpdateUser(cancelledUser);
+                        alert("Your subscription has been cancelled.");
+                        onClose();
+                      }
                     }}
-                    className="text-xs text-amber-400 hover:text-amber-300 underline font-medium cursor-pointer"
+                    className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/30 text-rose-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
                   >
-                    Or continue with Free Trial (30 free questions)
+                    Cancel Subscription
                   </button>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
 
-        {/* Step 2: Checkout Step */}
-        {step === 'checkout' && (
-          <div className="space-y-6">
-            <div className="text-center space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Secure {gateway === 'Squad' ? 'Squad Payment Gateway' : 'Korapay Gateway'}</span>
-              </div>
-              <h2 className="text-2xl font-extrabold text-white">Pay ₦{currentPlan.price.toLocaleString()}</h2>
-              <p className="text-xs text-slate-400">
-                Activating {currentPlan.name} for <strong className="text-white">{user.email}</strong>
-              </p>
-            </div>
+              {/* Plans Grid */}
+              <div className="space-y-3">
+                {displayPlans.map((p) => {
+                  const isSelected = selectedPlanId === p.id;
+                  const isFree = p.price === 0 || p.id === 'plan-free';
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => setSelectedPlanId(p.id)}
+                      className={`p-4 sm:p-5 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                        isSelected
+                          ? isFree
+                            ? 'bg-emerald-950/40 border-emerald-500 shadow-lg ring-1 ring-emerald-500'
+                            : 'bg-indigo-950/50 border-indigo-500 shadow-lg ring-1 ring-indigo-500'
+                          : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-sm text-white">{p.name}</h3>
+                          {p.popular && (
+                            <span className="bg-emerald-500 text-slate-950 font-extrabold text-[10px] px-2 py-0.5 rounded">
+                              Popular
+                            </span>
+                          )}
+                          {isFree && (
+                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[10px] px-2 py-0.5 rounded">
+                              Free Access
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {isFree
+                            ? '30 Free practice questions with full CBT engine access.'
+                            : `Full unlimited CBT access for ${p.durationDays} days.`}
+                        </p>
+                      </div>
 
-            <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-300 pb-3 border-b border-slate-800">
-                <span>Selected Subscription:</span>
-                <strong className="text-emerald-400 font-bold">{currentPlan.name}</strong>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-300 pb-3 border-b border-slate-800">
-                <span>Amount Payable:</span>
-                <strong className="text-white font-extrabold text-sm">₦{currentPlan.price.toLocaleString()}</strong>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span>Customer Email:</span>
-                <span className="text-slate-300 font-mono text-[11px]">{user.email}</span>
-              </div>
-            </div>
-
-            {/* Payment Card / Channel Details */}
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] text-slate-400 font-medium">Payment Card / Bank Account</label>
-                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                  {gateway === 'Squad' ? 'Squad Secure Channel' : 'Korapay Environment'}
-                </span>
+                      <div className="text-right shrink-0 ml-3">
+                        <p className={`text-xl font-black ${isFree ? 'text-amber-400' : 'text-emerald-400'}`}>
+                          {isFree ? 'FREE' : `₦${p.price.toLocaleString()}`}
+                        </p>
+                        <span className="text-[10px] text-slate-500 uppercase">{isFree ? '0 NGN' : p.currency}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              <div>
-                <input
-                  type="text"
-                  value={cardNumber}
-                  onChange={(e) => setCardNumber(e.target.value)}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Expiry Date</label>
-                  <input
-                    type="text"
-                    value={cardExpiry}
-                    onChange={(e) => setCardExpiry(e.target.value)}
-                    className="w-full p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-                  />
+              {/* Payment Info Banner */}
+              {!isFreeTrialSelected && (
+                <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl space-y-2 text-xs text-slate-300">
+                  <div className="flex items-center gap-2 font-bold text-emerald-400">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Bank Transfer & Card Payment (Squad / GTBank)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Make payment via Bank App Transfer, Debit Card, or USSD code. Your payment is automatically verified in real-time.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">CVV / CVC</label>
-                  <input
-                    type="password"
-                    value={cardCvc}
-                    onChange={(e) => setCardCvc(e.target.value)}
-                    className="w-full p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-                  />
+              )}
+
+              {/* Squad Error Banner */}
+              {squadError && (
+                <div className="p-4 bg-rose-950/40 border border-rose-500/40 rounded-2xl text-rose-300 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{squadError}</span>
+                </div>
+              )}
+
+              {/* Action Button */}
+              {isFreeTrialSelected ? (
+                <button
+                  onClick={handleFreeTrialActivation}
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  id="activate-free-trial-btn"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Start Free Trial (30 Free Questions)</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSquadCheckout}
+                  disabled={isInitializing}
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-bold text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                  id="pay-squad-btn"
+                >
+                  {isInitializing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Initializing payment...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-4 h-4 text-emerald-200" />
+                      <span>Pay with Squad (₦{currentPlan.price.toLocaleString()})</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Verifying & Payment Options */}
+          {step === 'verifying_squad' && (
+            <div className="py-2 space-y-5 animate-in fade-in">
+              
+              {/* Auto-Verification Live Banner */}
+              <div className="bg-emerald-950/60 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <div>
+                    <p className="font-extrabold text-emerald-300 text-xs">
+                      ⚡ Auto-Verifying Payment
+                    </p>
+                    <p className="text-[11px] text-emerald-400/80">
+                      Checking status automatically every 4s {lastCheckedTime ? `(Last checked: ${lastCheckedTime})` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="shrink-0">
+                  <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                    Live Engine
+                  </span>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setStep('plan_select')}
-                className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={handleProcessSquadPayment}
-                className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xl shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                id="pay-now-squad-btn"
-              >
-                <Lock className="w-4 h-4" />
-                <span>Pay ₦{currentPlan.price.toLocaleString()} via Squad Gateway</span>
-              </button>
-            </div>
-          </div>
-        )}
+              {/* Payment Method Selector Tabs */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('transfer')}
+                  className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    activeTab === 'transfer'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <Building className="w-4 h-4" />
+                  <span>Bank Transfer</span>
+                </button>
 
-        {/* Step 3: Verifying */}
-        {step === 'verifying' && (
-          <div className="py-12 text-center space-y-4">
-            <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-            <div className="space-y-2">
-              <h3 className="text-lg font-bold text-white">Verifying Payment on Server...</h3>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Communicating with Squad API server to verify transaction reference and grant instant access...
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Success */}
-        {step === 'success' && (
-          <div className="py-8 text-center space-y-5 animate-in zoom-in-95">
-            <div className="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30 shadow-2xl">
-              <CheckCircle2 className="w-10 h-10" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black text-white">Payment Verified & Activated!</h2>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
-                Congratulations! You now have unlimited access to all CBT questions, course topics, solution explanations, and practice engines on Acadet CBT Master.
-              </p>
-            </div>
-
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-left space-y-2 max-w-md mx-auto text-xs">
-              <div className="flex justify-between py-1 border-b border-slate-900">
-                <span className="text-slate-400">Plan:</span>
-                <strong className="text-white">{currentPlan.name}</strong>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('card')}
+                  className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    activeTab === 'card'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Card / USSD Online</span>
+                </button>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-900">
-                <span className="text-slate-400">Gateway:</span>
-                <span className="text-emerald-400 font-bold">Korapay Backend Verified</span>
+
+              {/* Tab 1: Direct Bank Transfer Details */}
+              {activeTab === 'transfer' && (
+                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                        <Building className="w-4 h-4 text-emerald-400" />
+                        <span>Pay via Bank App Transfer</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Transfer exact amount to the dedicated account below:
+                      </p>
+                    </div>
+                    <span className="text-lg font-black text-emerald-400">
+                      ₦{currentPlan.price.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    {/* Bank Name */}
+                    <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                      <span className="text-slate-400 font-semibold">Bank Name:</span>
+                      <strong className="text-white font-bold">
+                        {squadTxData?.transferDetails?.bankName || 'Guaranty Trust Bank (Squad)'}
+                      </strong>
+                    </div>
+
+                    {/* Account Number with Copy */}
+                    <div className="p-3 bg-slate-900/90 rounded-xl border border-emerald-500/30 flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
+                          Account Number
+                        </span>
+                        <span className="text-xl font-mono font-black text-amber-400 tracking-wider">
+                          {squadTxData?.transferDetails?.accountNumber || '8832049182'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopy(
+                            squadTxData?.transferDetails?.accountNumber || '8832049182',
+                            'acc'
+                          )
+                        }
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        {copiedField === 'acc' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-white" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Account Name */}
+                    <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                      <span className="text-slate-400 font-semibold">Account Name:</span>
+                      <span className="text-white font-bold">
+                        {squadTxData?.transferDetails?.accountName || `Acadet CBT - ${user?.name || 'Student'}`}
+                      </span>
+                    </div>
+
+                    {/* Reference with Copy */}
+                    <div className="flex justify-between items-center py-1">
+                      <span className="text-slate-400 font-semibold">Payment Reference:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] text-amber-300 font-bold">
+                          {squadTxData?.reference}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(squadTxData?.reference || '', 'ref')}
+                          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                          title="Copy Reference"
+                        >
+                          {copiedField === 'ref' ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-300/90 leading-relaxed">
+                    💡 <strong>Automatic Verification Active:</strong> Make your transfer using your banking app. Once sent, our system automatically verifies and unlocks your CBT Master Pass in seconds!
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: Online Card / USSD Payment */}
+              {activeTab === 'card' && (
+                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 text-center">
+                  <div className="w-12 h-12 bg-indigo-500/20 text-indigo-400 rounded-2xl flex items-center justify-center mx-auto border border-indigo-500/30">
+                    <CreditCard className="w-6 h-6" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h4 className="font-extrabold text-white text-base">Pay via Squad Online Checkout</h4>
+                    <p className="text-xs text-slate-400">
+                      Supports Debit Cards (Mastercard, Visa, Verve) & USSD codes.
+                    </p>
+                  </div>
+
+                  {squadTxData?.checkoutUrl && (
+                    <button
+                      type="button"
+                      onClick={() => window.open(squadTxData.checkoutUrl, '_blank', 'noopener,noreferrer')}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>Open Squad Payment Gateway (Card / USSD)</span>
+                    </button>
+                  )}
+
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-[11px] text-slate-400 leading-relaxed">
+                    🔒 Complete your payment on the secure Squad Gateway page. Your subscription will automatically unlock as soon as payment is confirmed!
+                  </div>
+                </div>
+              )}
+
+              {/* Verification Feedback Banner */}
+              {verifyMsg && (
+                <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-amber-300 text-xs flex items-center gap-2 max-w-md mx-auto text-left">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>{verifyMsg}</span>
+                </div>
+              )}
+
+              {/* Manual Verification Trigger Button */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleVerifySquad(false)}
+                  disabled={isVerifying}
+                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                  id="verify-squad-status-btn"
+                >
+                  {isVerifying ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Checking Payment Status with Squad...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Manual Verification (Check Now)</span>
+                    </>
+                  )}
+                </button>
               </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400">Reference:</span>
-                <span className="text-slate-300 font-mono text-[11px]">{activeRef || `KORA-${Date.now()}`}</span>
+
+            </div>
+          )}
+
+          {/* Step 3: Success */}
+          {step === 'success' && (
+            <div className="py-8 text-center space-y-5 animate-in zoom-in-95">
+              <div className="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30 shadow-2xl">
+                <CheckCircle2 className="w-10 h-10" />
               </div>
-            </div>
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-white">Subscription Activated!</h2>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                  Congratulations! You now have full access to all CBT questions, course topics, solution explanations, and practice engines on Acadet CBT Master.
+                </p>
+              </div>
 
-            <button
-              onClick={onClose}
-              className="w-full max-w-md py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl transition-all cursor-pointer mx-auto block"
-              id="close-success-modal-btn"
-            >
-              Continue to CBT Practice Engine
-            </button>
-          </div>
-        )}
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-left space-y-2 max-w-md mx-auto text-xs">
+                <div className="flex justify-between py-1 border-b border-slate-900">
+                  <span className="text-slate-400">Selected Plan:</span>
+                  <strong className="text-white">{currentPlan.name}</strong>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-900">
+                  <span className="text-slate-400">Access Status:</span>
+                  <span className="text-emerald-400 font-bold">Active</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-slate-400">Activation Ref:</span>
+                  <span className="text-slate-300 font-mono text-[11px]">{activeRef || `ACT-${Date.now()}`}</span>
+                </div>
+              </div>
 
-        {/* Step 5: Failed / Cancelled */}
-        {step === 'failed' && (
-          <div className="py-8 text-center space-y-5 animate-in zoom-in-95">
-            <div className="w-20 h-20 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-500/30 shadow-2xl">
-              <X className="w-10 h-10" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black text-white">Payment Verification Failed</h2>
-              <p className="text-xs text-red-300 max-w-md mx-auto leading-relaxed">
-                {paymentError || 'We could not verify your payment with Korapay. Please check your payment details or try again.'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 max-w-md mx-auto">
               <button
-                type="button"
-                onClick={() => setStep('plan_select')}
-                className="w-full py-3.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm rounded-xl transition-colors cursor-pointer"
-              >
-                Try Again
-              </button>
-              <button
-                type="button"
                 onClick={onClose}
-                className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs sm:text-sm rounded-xl border border-slate-800 transition-colors cursor-pointer"
+                className="w-full max-w-md py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-xl transition-all cursor-pointer mx-auto block"
+                id="close-success-modal-btn"
               >
-                Close
+                Continue to CBT Practice Engine
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
     </div>
   );
 };
+

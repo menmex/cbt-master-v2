@@ -39,7 +39,7 @@ const configuredDbId = firebaseConfigData.firestoreDatabaseId || '(default)';
 const dbId = configuredDbId === 'ai-studio-aicbtsimulator-24029710-e20e-4e1e-a3cf-846d58bd47cf' ? '(default)' : configuredDbId;
 
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: true,
 }, dbId);
 
 export {

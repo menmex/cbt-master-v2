@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AdminNotification, NotificationType } from '../types';
-import { StorageService } from '../services/storage';
+import { StorageService, safeStringify } from '../services/storage';
 import {
   Bell,
   X,
@@ -78,7 +78,7 @@ export const InAppNotificationOverlay: React.FC<InAppNotificationOverlayProps> =
     const updated = [...dismissedIds, id];
     setDismissedIds(updated);
     try {
-      localStorage.setItem('cbt_dismissed_notifications', JSON.stringify(updated));
+      localStorage.setItem('cbt_dismissed_notifications', safeStringify(updated));
     } catch {
       // ignore
     }

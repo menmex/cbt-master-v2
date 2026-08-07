@@ -18,6 +18,19 @@ service cloud.firestore {
       allow update, delete: if isOwner(userId) || true;
     }
 
+    // Payments collection
+    match /payments/{paymentId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+    }
+
+    // Subscriptions collection
+    match /subscriptions/{subscriptionId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
     // Questions collection
     match /questions/{questionId} {
       allow read: if true;

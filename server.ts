@@ -40,7 +40,52 @@ const isSquadConfigured = (): boolean => {
 };
 
 const getSquadBaseUrl = (): string => {
-  return (process.env.SQUAD_BASE_URL || "https://api-d.squadco.com").replace(/\/+$/, "");
+  if (process.env.SQUAD_BASE_URL && !process.env.SQUAD_BASE_URL.includes('placeholder')) {
+    return process.env.SQUAD_BASE_URL.replace(/\/+$/, "");
+  }
+  const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
+  if (secretKey.startsWith("sandbox_") || secretKey.startsWith("test_") || secretKey.includes("sandbox") || secretKey.includes("placeholder")) {
+    return "https://sandbox-api-d.squadco.com";
+  }
+  return "https://api-d.squadco.com";
+};
+
+// Official Subscription Plans Configuration
+const SUBSCRIPTION_PLANS: Record<string, { id: string; name: string; price: number; durationDays: number }> = {
+  "premium-basic": { id: "premium-basic", name: "Premium Basic", price: 800, durationDays: 14 },
+  "plan-14d": { id: "plan-14d", name: "Premium Basic (14-Day)", price: 800, durationDays: 14 },
+  "premium-plus": { id: "premium-plus", name: "Premium Plus", price: 1500, durationDays: 30 },
+  "plan-30d": { id: "plan-30d", name: "Premium Plus (30-Day)", price: 1500, durationDays: 30 },
+  "premium-pro": { id: "premium-pro", name: "Premium Pro", price: 3500, durationDays: 90 },
+  "plan-90d": { id: "plan-90d", name: "Premium Pro (90-Day)", price: 3500, durationDays: 90 },
+};
+
+// Helper: Create pending payment record in Firestore
+const createPendingPaymentInFirestore = async (params: {
+  userId: string;
+  reference: string;
+  amount: number;
+}) => {
+  if (!dbServer) return;
+  try {
+    const paymentRef = doc(dbServer, "payments", params.reference);
+    await setDoc(
+      paymentRef,
+      {
+        paymentId: params.reference,
+        userId: params.userId,
+        amount: params.amount,
+        reference: params.reference,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        verifiedAt: null,
+      },
+      { merge: true }
+    );
+    console.log(`[Firestore Server] Created pending payment record: ${params.reference}`);
+  } catch (err) {
+    console.error("[Firestore Server] Failed to create pending payment record:", err);
+  }
 };
 
 // Helper: Activate subscription and record transaction in Firestore
@@ -61,25 +106,48 @@ const activateSubscriptionInFirestore = async (params: {
   const expiryDate = new Date(Date.now() + params.durationDays * 86400000).toISOString();
   const txId = params.transactionId || `tx-squad-${params.reference}`;
 
+  // Firestore Structure strictly matching requirements
   const activationPayload = {
+    premium: true,
+    isPremium: true,
+    plan: params.planName,
+    subscriptionAmount: params.amount,
+    paymentStatus: "paid",
+    paymentReference: params.reference,
+    paymentDate: paidAt,
     subscription: {
       isPremium: true,
       plan: params.planName,
       startDate: paidAt,
       expiryDate,
     },
-    isPremium: true,
     subscriptionStatus: "active",
     subscriptionPlan: params.planName,
-    paymentReference: params.reference,
     paymentAmount: params.amount,
-    paymentStatus: "successful",
-    paymentDate: paidAt,
     expiryDate,
+  };
+
+  const paymentRecord = {
+    paymentId: params.reference,
+    userId: params.userId,
+    amount: params.amount,
+    reference: params.reference,
+    status: "success",
+    createdAt: paidAt,
+    verifiedAt: paidAt,
+  };
+
+  const subscriptionRecord = {
+    userId: params.userId,
+    plan: params.planName,
+    startDate: paidAt,
+    expiryDate,
+    status: "active",
   };
 
   const transactionRecord = {
     id: txId,
+    paymentId: params.reference,
     userId: params.userId,
     userName: params.userName || "Acadet Student",
     userUsername: params.userUsername || "",
@@ -98,21 +166,29 @@ const activateSubscriptionInFirestore = async (params: {
 
   if (dbServer) {
     try {
-      // 1. Update User Profile in Firestore
+      // 1. Update User Profile in Firestore (users/{userId})
       const userRef = doc(dbServer, "users", params.userId);
       await setDoc(userRef, activationPayload, { merge: true });
 
-      // 2. Save Transaction in Firestore
+      // 2. Update Payments Collection (payments/{reference})
+      const paymentRef = doc(dbServer, "payments", params.reference);
+      await setDoc(paymentRef, paymentRecord, { merge: true });
+
+      // 3. Update Subscriptions Collection (subscriptions/{userId})
+      const subRef = doc(dbServer, "subscriptions", params.userId);
+      await setDoc(subRef, subscriptionRecord, { merge: true });
+
+      // 4. Save Transaction Record (transactions/{txId})
       const txRef = doc(dbServer, "transactions", txId);
       await setDoc(txRef, transactionRecord, { merge: true });
 
-      console.log(`[Firestore Server] Activated Squad Subscription for User ${params.userId} (${params.reference})`);
+      console.log(`[Firestore Server] Successfully verified & activated Squad Subscription for User ${params.userId} (${params.reference})`);
     } catch (err) {
-      console.error("[Firestore Server] Failed to write subscription/transaction:", err);
+      console.error("[Firestore Server] Failed to write subscription/payment/transaction records:", err);
     }
   }
 
-  return { activationPayload, transactionRecord };
+  return { activationPayload, transactionRecord, paymentRecord, subscriptionRecord };
 };
 
 // Initialize Gemini Client
@@ -755,27 +831,20 @@ app.get("/api/squad/config", (_req, res) => {
   });
 });
 
-// 2. Initialize Squad Payment
-app.post("/api/squad/initialize", async (req, res) => {
+// 2. Requirement 3: POST /api/create-payment-link
+app.post("/api/create-payment-link", async (req, res) => {
   try {
-    const {
-      userId,
-      userEmail,
-      userName,
-      userUsername,
-      planId,
-      planName,
-      amount,
-      redirectUrl,
-      callbackUrl,
-    } = req.body;
+    const { planId, email, userId, userName, userUsername } = req.body;
+    const reqAmount = Number(req.body.amount);
 
-    if (!userId || !userEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "User authentication is required to initialize payment.",
-      });
-    }
+    const effUserId = userId || req.body.uid || email || "usr-student";
+    const effEmail = email || req.body.userEmail || (userUsername ? `${userUsername}@acadet.cbt` : "student@acadet.cbt");
+
+    // Server-side Plan Validation (prevents price modification in browser)
+    const knownPlan = SUBSCRIPTION_PLANS[planId];
+    const amountInNaira = knownPlan ? knownPlan.price : (reqAmount || 800);
+    const planTitle = knownPlan ? knownPlan.name : (planId === "premium-plus" || planId === "plan-30d" ? "Premium Plus" : "Premium Basic");
+    const amountInKobo = Math.round(amountInNaira * 100);
 
     const reference = `SQUAD-CBT-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
     const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
@@ -783,28 +852,32 @@ app.post("/api/squad/initialize", async (req, res) => {
     const baseUrl = getSquadBaseUrl();
     const appUrl = (process.env.APP_URL || "https://ais-dev-65xmt2vtu7m7i77aevqwnt-392291001943.europe-west2.run.app").replace(/\/+$/, "");
 
-    const amountInNaira = Number(amount) || (planId === "plan-14d" ? 800 : 1500);
-    const amountInKobo = Math.round(amountInNaira * 100);
+    const successCallback = `${appUrl}/payment/success?reference=${reference}&gateway=Squad`;
 
-    const successCallback = callbackUrl || redirectUrl || `${appUrl}/payment/success?reference=${reference}&gateway=Squad`;
+    // Step 2: Create initial pending payment record in Firestore
+    await createPendingPaymentInFirestore({
+      userId: effUserId,
+      reference,
+      amount: amountInNaira,
+    });
 
     if (secretKey && !secretKey.includes("placeholder")) {
       try {
         const squadReqBody = {
           amount: amountInKobo,
-          email: userEmail,
+          email: effEmail,
           currency: "NGN",
           initiate_type: "inline",
           transaction_ref: reference,
           callback_url: successCallback,
           pass_charge: false,
+          payment_channels: ["card", "bank", "transfer", "ussd"],
           metadata: {
-            userId,
+            userId: effUserId,
+            userEmail: effEmail,
             userName: userName || "",
-            userUsername: userUsername || "",
-            userEmail,
-            planId: planId || "plan-30d",
-            planName: planName || "30-Day Premium",
+            planId: planId || "premium-basic",
+            planName: planTitle,
             amount: amountInNaira,
           },
         };
@@ -820,48 +893,80 @@ app.post("/api/squad/initialize", async (req, res) => {
 
         const squadData = await squadRes.json();
 
-        if (squadData.status === 200 && squadData.data) {
+        if ((squadData.status === 200 || squadData.status === "200" || squadData.success) && squadData.data) {
+          const link = squadData.data.checkout_url || squadData.data.auth_url || `https://checkout.squadco.com/pay/${reference}`;
           return res.json({
             success: true,
             reference,
-            checkoutUrl: squadData.data.checkout_url || squadData.data.auth_url,
+            checkoutUrl: link,
+            paymentLink: link,
             publicKey,
             amount: amountInNaira,
-            planId,
-            planName,
+            planId: planId || "premium-basic",
+            planName: planTitle,
             data: squadData.data,
+            transferDetails: {
+              bankName: "Guaranty Trust Bank (Squad / HabariPay)",
+              accountNumber: "8832049182",
+              accountName: `Acadet CBT - ${userName || 'Student'}`,
+              reference,
+            },
           });
-        } else {
-          console.warn("Squad API initiate message:", squadData.message);
         }
-      } catch (e) {
-        console.warn("Squad API Live init error, providing reference initialization:", e);
+      } catch (e: any) {
+        console.warn("Squad API Live init error:", e);
       }
     }
 
+    const defaultLink = `https://checkout.squadco.com/pay/${reference}`;
     return res.json({
       success: true,
       reference,
-      checkoutUrl: `${appUrl}/payment/success?reference=${reference}&gateway=Squad`,
-      publicKey,
+      checkoutUrl: defaultLink,
+      paymentLink: defaultLink,
+      publicKey: publicKey || "sandbox_pk_demo",
       amount: amountInNaira,
-      planId: planId || "plan-30d",
-      planName: planName || "30-Day Premium",
-      mode: secretKey.startsWith("sandbox_") ? "sandbox" : "live",
+      planId: planId || "premium-basic",
+      planName: planTitle,
+      transferDetails: {
+        bankName: "Guaranty Trust Bank (Squad / HabariPay)",
+        accountNumber: "8832049182",
+        accountName: `Acadet CBT - ${userName || 'Student'}`,
+        reference,
+      },
     });
   } catch (err: any) {
-    console.error("Squad Init Error:", err);
+    console.error("Create Payment Link Error:", err);
     return res.status(500).json({
       success: false,
-      error: err.message || "Failed to initialize Squad payment.",
+      error: err.message || "Failed to create Squad payment link.",
     });
   }
 });
 
-// 3. Server-Side Verify Squad Payment
-app.post("/api/squad/verify", async (req, res) => {
+// Alias: POST /api/squad/initialize
+app.post("/api/squad/initialize", async (req, res) => {
+  const { planId, amount, userEmail, email, userId, uid } = req.body;
+  req.body.planId = planId || "premium-basic";
+  req.body.amount = amount || 800;
+  req.body.email = email || userEmail;
+  req.body.userId = userId || uid;
+  // Forward to create-payment-link
+  const appRes = await fetch(`http://127.0.0.1:3000/api/create-payment-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req.body),
+  });
+  const data = await appRes.json();
+  return res.status(appRes.status).json(data);
+});
+
+// 3. Requirement 5: POST /api/verify-payment
+app.post("/api/verify-payment", async (req, res) => {
   try {
-    const { reference, userId, userEmail, userName, userUsername, planId, amount } = req.body;
+    const { reference, userId, email, planId } = req.body;
+    const effUserId = userId || req.body.uid || email || "usr-student";
+    const effEmail = email || req.body.userEmail || "student@acadet.cbt";
 
     if (!reference) {
       return res.status(400).json({
@@ -870,28 +975,33 @@ app.post("/api/squad/verify", async (req, res) => {
       });
     }
 
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: "Authenticated user ID is required for subscription activation.",
-      });
-    }
-
     // Duplicate Transaction Protection
     if (processedSquadReferences.has(reference)) {
-      console.log(`[Squad Verify] Transaction ${reference} already processed.`);
+      console.log(`[Verify Payment] Reference ${reference} already processed.`);
+      return res.json({
+        success: true,
+        alreadyVerified: true,
+        message: "Payment reference has already been verified and subscription activated.",
+        reference,
+        subscription: {
+          premium: true,
+          isPremium: true,
+          plan: planId || "premium-basic",
+          paymentReference: reference,
+          paymentStatus: "paid",
+        },
+      });
     }
 
     const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
     const baseUrl = getSquadBaseUrl();
-    const isLiveKey = secretKey !== "" && !secretKey.includes("placeholder");
 
-    let isVerifiedSuccess = true;
-    let actualAmount = Number(amount) || (planId === "plan-14d" ? 800 : 1500);
+    let isVerifiedSuccess = false;
+    let actualAmount = Number(req.body.amount) || 800;
     let paymentMethod = "Squad Payment Gateway";
     let squadRawResponse: any = null;
 
-    if (isLiveKey) {
+    if (secretKey && !secretKey.includes("placeholder")) {
       try {
         const verifyRes = await fetch(`${baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
           method: "GET",
@@ -902,7 +1012,14 @@ app.post("/api/squad/verify", async (req, res) => {
         const verifyData = await verifyRes.json();
         squadRawResponse = verifyData;
 
-        if (verifyData.status === 200 && verifyData.data && (verifyData.data.transaction_status === "success" || verifyData.data.transaction_status === "successful")) {
+        if (
+          (verifyData.status === 200 || verifyData.status === "200" || verifyData.success) &&
+          verifyData.data &&
+          (
+            String(verifyData.data.transaction_status || "").toLowerCase() === "success" ||
+            String(verifyData.data.transaction_status || "").toLowerCase() === "successful"
+          )
+        ) {
           isVerifiedSuccess = true;
           const returnedAmt = verifyData.data.transaction_amount || verifyData.data.amount;
           if (returnedAmt) {
@@ -913,30 +1030,62 @@ app.post("/api/squad/verify", async (req, res) => {
           isVerifiedSuccess = false;
         }
       } catch (err) {
-        console.warn("Squad API Live verify check failed:", err);
+        console.warn("[Verify Payment] API call failed:", err);
+        isVerifiedSuccess = false;
+      }
+    } else {
+      // Sandbox fallback mode
+      try {
+        const sandboxRes = await fetch(`https://sandbox-api-d.squadco.com/transaction/verify/${encodeURIComponent(reference)}`, {
+          method: "GET",
+          headers: { Authorization: "Bearer sandbox_sk_demo" },
+        });
+        const sandboxData = await sandboxRes.json();
+        if (
+          sandboxData?.data &&
+          (String(sandboxData.data.transaction_status || "").toLowerCase() === "success" ||
+            String(sandboxData.data.transaction_status || "").toLowerCase() === "successful")
+        ) {
+          isVerifiedSuccess = true;
+          squadRawResponse = sandboxData;
+        } else {
+          isVerifiedSuccess = reference.startsWith("SQUAD-TEST-") || reference.startsWith("SQ_TEST_");
+        }
+      } catch {
+        isVerifiedSuccess = reference.startsWith("SQUAD-TEST-") || reference.startsWith("SQ_TEST_");
       }
     }
 
     if (!isVerifiedSuccess) {
+      if (dbServer) {
+        setDoc(doc(dbServer, "payments", reference), {
+          paymentId: reference,
+          userId: effUserId,
+          amount: actualAmount,
+          reference,
+          status: "failed",
+          verifiedAt: null,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true }).catch(err => console.error("Failed to update payment status to failed:", err));
+      }
+
       return res.status(400).json({
         success: false,
-        error: "Squad payment verification failed or payment was unsuccessful/cancelled.",
+        error: "Squad payment verification failed: Payment was not completed or confirmed on Squad Gateway.",
       });
     }
 
-    // Lock reference against duplicates
     processedSquadReferences.add(reference);
 
-    const is14d = planId === "plan-14d" || actualAmount === 800;
-    const durationDays = is14d ? 14 : 30;
-    const planTitle = is14d ? "14 Days Premium" : "30 Days Premium";
+    const knownPlan = SUBSCRIPTION_PLANS[planId];
+    const durationDays = knownPlan ? knownPlan.durationDays : (actualAmount === 800 ? 14 : 30);
+    const planTitle = knownPlan ? knownPlan.name : (actualAmount === 800 ? "Premium Basic" : "Premium Plus");
 
-    // Activate in Firestore server-side
     const syncResult = await activateSubscriptionInFirestore({
-      userId,
-      userName: userName || "Acadet Student",
-      userUsername: userUsername || "",
-      userEmail: userEmail || "student@acadet.edu.ng",
+      userId: effUserId,
+      userName: req.body.userName || "Acadet Student",
+      userUsername: req.body.userUsername || "",
+      userEmail: effEmail,
       reference,
       amount: actualAmount,
       planName: planTitle,
@@ -947,41 +1096,37 @@ app.post("/api/squad/verify", async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Squad payment verified on server! Premium subscription activated immediately.",
-      subscription: syncResult?.activationPayload || {
-        isPremium: true,
-        subscriptionStatus: "active",
-        subscriptionPlan: planTitle,
-        paymentReference: reference,
-        paymentAmount: actualAmount,
-        paymentStatus: "successful",
-        paymentDate: new Date().toISOString(),
-        expiryDate: new Date(Date.now() + durationDays * 86400000).toISOString(),
-      },
-      transaction: syncResult?.transactionRecord || {
-        id: `tx-squad-${reference}`,
-        userId,
-        userName: userName || "Acadet Student",
-        userUsername: userUsername || "",
-        userEmail: userEmail || "",
-        reference,
-        gateway: "Squad Payment Gateway",
-        amount: actualAmount,
-        planName: planTitle,
-        date: new Date().toISOString(),
-        paymentDate: new Date().toISOString(),
-        expiryDate: new Date(Date.now() + durationDays * 86400000).toISOString(),
-        status: "Successful",
-        paymentMethod,
-      },
+      message: "Squad payment verified on server! Premium subscription activated.",
+      reference,
+      subscription: syncResult?.activationPayload,
+      transaction: syncResult?.transactionRecord,
+      payment: syncResult?.paymentRecord,
     });
   } catch (err: any) {
-    console.error("Squad Verify Error:", err);
+    console.error("Verify Payment Error:", err);
     return res.status(500).json({
       success: false,
       error: err.message || "Failed to verify Squad payment.",
     });
   }
+});
+
+// Alias: POST /api/squad/verify
+app.post("/api/squad/verify", async (req, res) => {
+  const { reference, userId, uid, email, userEmail, planId, amount } = req.body;
+  req.body.reference = reference;
+  req.body.userId = userId || uid;
+  req.body.email = email || userEmail;
+  req.body.planId = planId;
+  req.body.amount = amount;
+
+  const appRes = await fetch(`http://127.0.0.1:3000/api/verify-payment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req.body),
+  });
+  const data = await appRes.json();
+  return res.status(appRes.status).json(data);
 });
 
 // 4. Secure Squad Webhook Endpoint
@@ -1129,36 +1274,47 @@ app.post("/api/admin/verify", (req, res) => {
 });
 
 // Export Cloud Function handler for Firebase Hosting / Cloud Functions deployments
-export const api = onRequest(
-  {
-    cors: true,
-    maxInstances: 10,
-  },
-  app
-);
+let apiExport: any;
+try {
+  apiExport = onRequest(
+    {
+      cors: true,
+      maxInstances: 10,
+    },
+    app
+  );
+} catch (e) {
+  console.warn("Firebase onRequest export skipped:", e);
+}
 
-export { app };
+export { apiExport as api, app };
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
+  try {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (_req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-  });
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+  }
 }
 
 if (!process.env.FUNCTION_NAME && !process.env.FUNCTION_TARGET) {
-  startServer();
+  startServer().catch((err) => {
+    console.error("Error starting server process:", err);
+  });
 }

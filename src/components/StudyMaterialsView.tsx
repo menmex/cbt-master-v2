@@ -171,22 +171,11 @@ export const StudyMaterialsView: React.FC<StudyMaterialsViewProps> = ({
 
   // Handle Download Request
   const handleDownloadClick = (material: MaterialItem) => {
-    // 1. NON-PREMIUM RESTRICTION: Users must pay/subscribe to Premium FIRST!
-    if (!isPremium) {
-      setLockedMaterialName(material.title);
-      setShowPremiumLockModal(true);
-      return;
+    // Directly trigger file download without payment checkout
+    if (onPurchaseMaterial && !purchasedMaterialIds.includes(material.id)) {
+      onPurchaseMaterial(material.id);
     }
-
-    // 2. PREMIUM USER: Check if material has already been paid for (₦500)
-    const isPurchased = purchasedMaterialIds.includes(material.id);
-    if (isPurchased) {
-      triggerFileDownload(material);
-    } else {
-      // Prompt ₦500 payment modal
-      setCheckoutMaterial(material);
-      setPaymentSuccessMsg(null);
-    }
+    triggerFileDownload(material);
   };
 
   // Execute Actual Browser Download

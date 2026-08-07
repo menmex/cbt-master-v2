@@ -96,12 +96,48 @@
         "uploadDate": { "type": "string" }
       },
       "required": ["id", "title", "type", "accessLevel"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment records for Squad Gateway transactions",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "reference": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "success", "failed"] },
+        "createdAt": { "type": "string" },
+        "verifiedAt": { "type": "string" }
+      },
+      "required": ["paymentId", "userId", "amount", "reference", "status", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User active subscription record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "plan": { "type": "string" },
+        "startDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired"] }
+      },
+      "required": ["userId", "plan", "startDate", "expiryDate", "status"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profile records containing subscription & free trial usage"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Squad payment transaction records"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "Active user subscription records"
     },
     "/questions/{questionId}": {
       "schema": "Question",
