@@ -451,6 +451,52 @@ export function sanitizeForJSON(val: any, seen = new WeakSet<any>(), depth = 0):
 export function safeStringify(obj: any, indent?: number): string {
   if (obj === undefined) return 'undefined';
   if (obj === null) return 'null';
+  if (typeof obj === 'string') return obj;
+  if (typeof obj === 'number' || typeof obj === 'boolean') return String(obj);
+
+  const seenSet = new WeakSet();
+  const replacer = (key: string, value: any) => {
+    if (key === 'toJSON') return undefined;
+    if (
+      key === '_delegate' ||
+      key === '_firestore' ||
+      key === '_app' ||
+      key === '_auth' ||
+      key === 'stsTokenManager' ||
+      key === 'proactiveRefresh' ||
+      key === 'reloadUserInfo' ||
+      key.startsWith('$$')
+    ) {
+      return undefined;
+    }
+    if (typeof value === 'object' && value !== null) {
+      if (seenSet.has(value)) {
+        return '[Circular]';
+      }
+      let cName = '';
+      try {
+        cName = value?.constructor?.name || '';
+      } catch {
+        cName = '';
+      }
+      if (
+        cName === 'Y2' ||
+        cName === 'Ka' ||
+        cName === 'UserImpl' ||
+        cName === 'AuthImpl' ||
+        cName === 'Firestore' ||
+        (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date')
+      ) {
+        return `[SDK Object: ${cName || 'Internal'}]`;
+      }
+      try {
+        seenSet.add(value);
+      } catch {
+        // ignore
+      }
+    }
+    return value;
+  };
 
   try {
     const clean = sanitizeForJSON(obj);
@@ -459,43 +505,10 @@ export function safeStringify(obj: any, indent?: number): string {
         JSON.parse(clean);
         return clean;
       } catch {
-        return JSON.stringify(clean);
+        return JSON.stringify(clean, replacer, indent);
       }
     }
-    const seenSet = new WeakSet();
-    const result = JSON.stringify(
-      clean,
-      (key, value) => {
-        if (key === 'toJSON') return undefined;
-        if (typeof value === 'object' && value !== null) {
-          if (seenSet.has(value)) {
-            return '[Circular]';
-          }
-          let cName = '';
-          try {
-            cName = value?.constructor?.name || '';
-          } catch {
-            cName = '';
-          }
-          if (
-            cName === 'Y2' ||
-            cName === 'Ka' ||
-            cName === 'UserImpl' ||
-            cName === 'AuthImpl' ||
-            (cName.length > 0 && cName.length <= 3 && cName !== 'Object' && cName !== 'Array' && cName !== 'Set' && cName !== 'Map' && cName !== 'Date')
-          ) {
-            return '[SDK Class]';
-          }
-          try {
-            seenSet.add(value);
-          } catch {
-            // ignore
-          }
-        }
-        return value;
-      },
-      indent
-    );
+    const result = JSON.stringify(clean, replacer, indent);
     return result !== undefined ? result : 'null';
   } catch {
     try {
@@ -505,10 +518,10 @@ export function safeStringify(obj: any, indent?: number): string {
           JSON.parse(stripped);
           return stripped;
         } catch {
-          return JSON.stringify(stripped);
+          return JSON.stringify(stripped, replacer, indent);
         }
       }
-      return JSON.stringify(stripped, (k, v) => (k === 'toJSON' ? undefined : v)) || '{}';
+      return JSON.stringify(stripped, replacer, indent) || '{}';
     } catch {
       return '{}';
     }

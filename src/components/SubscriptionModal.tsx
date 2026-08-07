@@ -203,12 +203,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         setSquadTxData({
           reference: res.reference,
           checkoutUrl,
-          transferDetails: res.transferDetails || {
-            bankName: 'Guaranty Trust Bank (Squad / HabariPay)',
-            accountNumber: '8832049182',
-            accountName: `Acadet CBT - ${user?.name || 'Student'}`,
-            reference: res.reference,
-          },
+          transferDetails: res.transferDetails || null,
         });
 
         // Open Squad checkout URL in a new window/tab if available
@@ -585,7 +580,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                         <span>Pay via Bank App Transfer</span>
                       </h4>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Transfer exact amount to the dedicated account below:
+                        {squadTxData?.transferDetails?.accountNumber
+                          ? 'Transfer exact amount to the dedicated account below:'
+                          : 'Complete payment on Squad Gateway using Bank Transfer, Card, or USSD:'}
                       </p>
                     </div>
                     <span className="text-lg font-black text-emerald-400">
@@ -593,82 +590,101 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                     </span>
                   </div>
 
-                  <div className="space-y-3 text-xs">
-                    {/* Bank Name */}
-                    <div className="flex justify-between items-center py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-semibold">Bank Name:</span>
-                      <strong className="text-white font-bold">
-                        {squadTxData?.transferDetails?.bankName || 'Guaranty Trust Bank (Squad)'}
-                      </strong>
-                    </div>
-
-                    {/* Account Number with Copy */}
-                    <div className="p-3 bg-slate-900/90 rounded-xl border border-emerald-500/30 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
-                          Account Number
-                        </span>
-                        <span className="text-xl font-mono font-black text-amber-400 tracking-wider">
-                          {squadTxData?.transferDetails?.accountNumber || '8832049182'}
-                        </span>
+                  {squadTxData?.transferDetails?.accountNumber ? (
+                    <div className="space-y-3 text-xs">
+                      {/* Bank Name */}
+                      <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                        <span className="text-slate-400 font-semibold">Bank Name:</span>
+                        <strong className="text-white font-bold">
+                          {squadTxData.transferDetails.bankName || 'GTBank (Squad)'}
+                        </strong>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCopy(
-                            squadTxData?.transferDetails?.accountNumber || '8832049182',
-                            'acc'
-                          )
-                        }
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                      >
-                        {copiedField === 'acc' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-white" />
-                            <span>Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
 
-                    {/* Account Name */}
-                    <div className="flex justify-between items-center py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-semibold">Account Name:</span>
-                      <span className="text-white font-bold">
-                        {squadTxData?.transferDetails?.accountName || `Acadet CBT - ${user?.name || 'Student'}`}
-                      </span>
-                    </div>
-
-                    {/* Reference with Copy */}
-                    <div className="flex justify-between items-center py-1">
-                      <span className="text-slate-400 font-semibold">Payment Reference:</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[11px] text-amber-300 font-bold">
-                          {squadTxData?.reference}
-                        </span>
+                      {/* Account Number with Copy */}
+                      <div className="p-3 bg-slate-900/90 rounded-xl border border-emerald-500/30 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
+                            Account Number
+                          </span>
+                          <span className="text-xl font-mono font-black text-amber-400 tracking-wider">
+                            {squadTxData.transferDetails.accountNumber}
+                          </span>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => handleCopy(squadTxData?.reference || '', 'ref')}
-                          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
-                          title="Copy Reference"
+                          onClick={() =>
+                            handleCopy(squadTxData.transferDetails!.accountNumber, 'acc')
+                          }
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
                         >
-                          {copiedField === 'ref' ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
+                          {copiedField === 'acc' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-white" />
+                              <span>Copied!</span>
+                            </>
                           ) : (
-                            <Copy className="w-3 h-3" />
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy</span>
+                            </>
                           )}
                         </button>
                       </div>
+
+                      {/* Account Name */}
+                      <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                        <span className="text-slate-400 font-semibold">Account Name:</span>
+                        <span className="text-white font-bold">
+                          {squadTxData.transferDetails.accountName || `Acadet CBT - ${user?.name || 'Student'}`}
+                        </span>
+                      </div>
+
+                      {/* Reference with Copy */}
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-slate-400 font-semibold">Payment Reference:</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px] text-amber-300 font-bold">
+                            {squadTxData?.reference}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(squadTxData?.reference || '', 'ref')}
+                            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
+                            title="Copy Reference"
+                          >
+                            {copiedField === 'ref' ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 text-center space-y-3">
+                      <p className="text-xs text-slate-300">
+                        Click the button below to open Squad Gateway. Squad supports instant Bank Transfer, Debit Cards, and USSD:
+                      </p>
+                      {squadTxData?.checkoutUrl && (
+                        <a
+                          href={squadTxData.checkoutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-md"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          <span>Open Squad Secure Checkout</span>
+                        </a>
+                      )}
+                      <div className="text-[11px] text-slate-400 font-mono">
+                        Ref: {squadTxData?.reference}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-300/90 leading-relaxed">
-                    💡 <strong>Automatic Verification Active:</strong> Make your transfer using your banking app. Once sent, our system automatically verifies and unlocks your CBT Master Pass in seconds!
+                    💡 <strong>Automatic Verification:</strong> Complete payment on Squad, then click "Verify Payment Status" below to activate your Premium access!
                   </div>
                 </div>
               )}

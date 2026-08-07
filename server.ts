@@ -840,17 +840,24 @@ app.post("/api/create-payment-link", async (req, res) => {
     const effUserId = userId || req.body.uid || email || "usr-student";
     const effEmail = email || req.body.userEmail || (userUsername ? `${userUsername}@acadet.cbt` : "student@acadet.cbt");
 
-    // Server-side Plan Validation (prevents price modification in browser)
+    // Server-side Plan Validation
     const knownPlan = SUBSCRIPTION_PLANS[planId];
     const amountInNaira = knownPlan ? knownPlan.price : (reqAmount || 800);
     const planTitle = knownPlan ? knownPlan.name : (planId === "premium-plus" || planId === "plan-30d" ? "Premium Plus" : "Premium Basic");
     const amountInKobo = Math.round(amountInNaira * 100);
 
     const reference = `SQUAD-CBT-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-    const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
+    const secretKey = (process.env.SQUAD_SECRET_KEY || process.env.SQUAD_WEBHOOK_SECRET || "").trim();
     const publicKey = (process.env.SQUAD_PUBLIC_KEY || process.env.VITE_SQUAD_PUBLIC_KEY || "").trim();
     const baseUrl = getSquadBaseUrl();
     const appUrl = (process.env.APP_URL || "https://ais-dev-65xmt2vtu7m7i77aevqwnt-392291001943.europe-west2.run.app").replace(/\/+$/, "");
+
+    if (!secretKey || secretKey.includes("placeholder")) {
+      return res.status(400).json({
+        success: false,
+        error: "Squad Secret Key (SQUAD_SECRET_KEY) is missing or not configured in environment variables.",
+      });
+    }
 
     const successCallback = `${appUrl}/payment/success?reference=${reference}&gateway=Squad`;
 
@@ -861,85 +868,74 @@ app.post("/api/create-payment-link", async (req, res) => {
       amount: amountInNaira,
     });
 
-    if (secretKey && !secretKey.includes("placeholder")) {
-      try {
-        const squadReqBody = {
-          amount: amountInKobo,
-          email: effEmail,
-          currency: "NGN",
-          initiate_type: "inline",
-          transaction_ref: reference,
-          callback_url: successCallback,
-          pass_charge: false,
-          payment_channels: ["card", "bank", "transfer", "ussd"],
-          metadata: {
-            userId: effUserId,
-            userEmail: effEmail,
-            userName: userName || "",
-            planId: planId || "premium-basic",
-            planName: planTitle,
-            amount: amountInNaira,
-          },
-        };
-
-        const squadRes = await fetch(`${baseUrl}/transaction/initiate`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${secretKey}`,
-          },
-          body: JSON.stringify(squadReqBody),
-        });
-
-        const squadData = await squadRes.json();
-
-        if ((squadData.status === 200 || squadData.status === "200" || squadData.success) && squadData.data) {
-          const link = squadData.data.checkout_url || squadData.data.auth_url || `https://checkout.squadco.com/pay/${reference}`;
-          return res.json({
-            success: true,
-            reference,
-            checkoutUrl: link,
-            paymentLink: link,
-            publicKey,
-            amount: amountInNaira,
-            planId: planId || "premium-basic",
-            planName: planTitle,
-            data: squadData.data,
-            transferDetails: {
-              bankName: "Guaranty Trust Bank (Squad / HabariPay)",
-              accountNumber: "8832049182",
-              accountName: `Acadet CBT - ${userName || 'Student'}`,
-              reference,
-            },
-          });
-        }
-      } catch (e: any) {
-        console.warn("Squad API Live init error:", e);
-      }
-    }
-
-    const defaultLink = `https://checkout.squadco.com/pay/${reference}`;
-    return res.json({
-      success: true,
-      reference,
-      checkoutUrl: defaultLink,
-      paymentLink: defaultLink,
-      publicKey: publicKey || "sandbox_pk_demo",
-      amount: amountInNaira,
-      planId: planId || "premium-basic",
-      planName: planTitle,
-      transferDetails: {
-        bankName: "Guaranty Trust Bank (Squad / HabariPay)",
-        accountNumber: "8832049182",
-        accountName: `Acadet CBT - ${userName || 'Student'}`,
-        reference,
+    const squadReqBody = {
+      amount: amountInKobo,
+      email: effEmail,
+      currency: "NGN",
+      initiate_type: "inline",
+      transaction_ref: reference,
+      callback_url: successCallback,
+      pass_charge: false,
+      payment_channels: ["card", "bank", "transfer", "ussd"],
+      metadata: {
+        userId: effUserId,
+        userEmail: effEmail,
+        userName: userName || "",
+        planId: planId || "premium-basic",
+        planName: planTitle,
+        amount: amountInNaira,
       },
+    };
+
+    const squadRes = await fetch(`${baseUrl}/transaction/initiate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${secretKey}`,
+      },
+      body: JSON.stringify(squadReqBody),
     });
+
+    const squadData = await squadRes.json();
+
+    if ((squadData.status === 200 || squadData.status === "200" || squadData.success) && squadData.data) {
+      const link = squadData.data.checkout_url || squadData.data.auth_url;
+      if (!link) {
+        return res.status(400).json({
+          success: false,
+          error: "Squad Payment Gateway did not return a valid checkout URL.",
+          squadResponse: squadData,
+        });
+      }
+      return res.json({
+        success: true,
+        reference,
+        checkoutUrl: link,
+        paymentLink: link,
+        publicKey,
+        amount: amountInNaira,
+        planId: planId || "premium-basic",
+        planName: planTitle,
+        data: squadData.data,
+        transferDetails: (squadData.data.virtual_account_number || squadData.data.account_number) ? {
+          bankName: squadData.data.bank_name || "GTBank (Squad)",
+          accountNumber: squadData.data.virtual_account_number || squadData.data.account_number,
+          accountName: squadData.data.account_name || `Acadet CBT - ${userName || 'Student'}`,
+          reference,
+        } : null,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: squadData.message || squadData.error || "Squad payment initialization failed.",
+        squadResponse: squadData,
+      });
+    }
   } catch (err: any) {
     console.error("Create Payment Link Error:", err);
     return res.status(500).json({
       success: false,
-      error: err.message || "Failed to create Squad payment link.",
+      error: err.message || "Failed to initialize transaction on Squad Payment Gateway.",
     });
   }
 });
@@ -951,7 +947,7 @@ app.post("/api/squad/initialize", async (req, res) => {
   req.body.amount = amount || 800;
   req.body.email = email || userEmail;
   req.body.userId = userId || uid;
-  // Forward to create-payment-link
+
   const appRes = await fetch(`http://127.0.0.1:3000/api/create-payment-link`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -975,6 +971,14 @@ app.post("/api/verify-payment", async (req, res) => {
       });
     }
 
+    const secretKey = (process.env.SQUAD_SECRET_KEY || process.env.SQUAD_WEBHOOK_SECRET || "").trim();
+    if (!secretKey || secretKey.includes("placeholder")) {
+      return res.status(400).json({
+        success: false,
+        error: "Squad Secret Key (SQUAD_SECRET_KEY) is missing or not configured in environment variables.",
+      });
+    }
+
     // Duplicate Transaction Protection
     if (processedSquadReferences.has(reference)) {
       console.log(`[Verify Payment] Reference ${reference} already processed.`);
@@ -984,7 +988,6 @@ app.post("/api/verify-payment", async (req, res) => {
         message: "Payment reference has already been verified and subscription activated.",
         reference,
         subscription: {
-          premium: true,
           isPremium: true,
           plan: planId || "premium-basic",
           paymentReference: reference,
@@ -993,89 +996,49 @@ app.post("/api/verify-payment", async (req, res) => {
       });
     }
 
-    const secretKey = (process.env.SQUAD_SECRET_KEY || "").trim();
     const baseUrl = getSquadBaseUrl();
+    const verifyRes = await fetch(`${baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+      },
+    });
 
-    let isVerifiedSuccess = false;
-    let actualAmount = Number(req.body.amount) || 800;
-    let paymentMethod = "Squad Payment Gateway";
-    let squadRawResponse: any = null;
-
-    if (secretKey && !secretKey.includes("placeholder")) {
-      try {
-        const verifyRes = await fetch(`${baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${secretKey}`,
-          },
-        });
-        const verifyData = await verifyRes.json();
-        squadRawResponse = verifyData;
-
-        if (
-          (verifyData.status === 200 || verifyData.status === "200" || verifyData.success) &&
-          verifyData.data &&
-          (
-            String(verifyData.data.transaction_status || "").toLowerCase() === "success" ||
-            String(verifyData.data.transaction_status || "").toLowerCase() === "successful"
-          )
-        ) {
-          isVerifiedSuccess = true;
-          const returnedAmt = verifyData.data.transaction_amount || verifyData.data.amount;
-          if (returnedAmt) {
-            actualAmount = returnedAmt > 10000 ? Math.round(returnedAmt / 100) : returnedAmt;
-          }
-          paymentMethod = verifyData.data.payment_method || verifyData.data.channel || "Squad Checkout";
-        } else {
-          isVerifiedSuccess = false;
-        }
-      } catch (err) {
-        console.warn("[Verify Payment] API call failed:", err);
-        isVerifiedSuccess = false;
-      }
-    } else {
-      // Sandbox fallback mode
-      try {
-        const sandboxRes = await fetch(`https://sandbox-api-d.squadco.com/transaction/verify/${encodeURIComponent(reference)}`, {
-          method: "GET",
-          headers: { Authorization: "Bearer sandbox_sk_demo" },
-        });
-        const sandboxData = await sandboxRes.json();
-        if (
-          sandboxData?.data &&
-          (String(sandboxData.data.transaction_status || "").toLowerCase() === "success" ||
-            String(sandboxData.data.transaction_status || "").toLowerCase() === "successful")
-        ) {
-          isVerifiedSuccess = true;
-          squadRawResponse = sandboxData;
-        } else {
-          isVerifiedSuccess = reference.startsWith("SQUAD-TEST-") || reference.startsWith("SQ_TEST_");
-        }
-      } catch {
-        isVerifiedSuccess = reference.startsWith("SQUAD-TEST-") || reference.startsWith("SQ_TEST_");
-      }
-    }
+    const verifyData = await verifyRes.json();
+    const isVerifiedSuccess = (
+      (verifyData.status === 200 || verifyData.status === "200" || verifyData.success) &&
+      verifyData.data &&
+      (
+        String(verifyData.data.transaction_status || "").toLowerCase() === "success" ||
+        String(verifyData.data.transaction_status || "").toLowerCase() === "successful"
+      )
+    );
 
     if (!isVerifiedSuccess) {
       if (dbServer) {
         setDoc(doc(dbServer, "payments", reference), {
           paymentId: reference,
           userId: effUserId,
-          amount: actualAmount,
           reference,
           status: "failed",
           verifiedAt: null,
+          squadResponse: verifyData,
           updatedAt: new Date().toISOString(),
         }, { merge: true }).catch(err => console.error("Failed to update payment status to failed:", err));
       }
 
       return res.status(400).json({
         success: false,
-        error: "Squad payment verification failed: Payment was not completed or confirmed on Squad Gateway.",
+        error: verifyData.message || "Squad payment verification failed: Payment was not confirmed on Squad Gateway.",
+        squadResponse: verifyData,
       });
     }
 
     processedSquadReferences.add(reference);
+
+    const returnedAmt = verifyData.data.transaction_amount || verifyData.data.amount;
+    const actualAmount = returnedAmt ? (returnedAmt > 10000 ? Math.round(returnedAmt / 100) : returnedAmt) : (Number(req.body.amount) || 800);
+    const paymentMethod = verifyData.data.payment_method || verifyData.data.channel || "Squad Checkout";
 
     const knownPlan = SUBSCRIPTION_PLANS[planId];
     const durationDays = knownPlan ? knownPlan.durationDays : (actualAmount === 800 ? 14 : 30);
@@ -1091,7 +1054,7 @@ app.post("/api/verify-payment", async (req, res) => {
       planName: planTitle,
       durationDays,
       paymentMethod,
-      squadResponse: squadRawResponse,
+      squadResponse: verifyData,
     });
 
     return res.json({
